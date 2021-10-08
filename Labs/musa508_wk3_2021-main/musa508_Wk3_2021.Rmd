@@ -33,6 +33,7 @@ library(grid)
 library(knitr)
 library(kableExtra)
 library(rmarkdown)
+library(RColorBrewer)
 ```
 
 ## Load Themes
@@ -47,13 +48,13 @@ Add to these and create color palettes if you please!
 root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 
+display.brewer.all()
+
+palette <- c("#C81D77","#C11C7D","#B91B83","#B21A88","#AA198E","#A31894","#9B179A","#94169F","#8C15A5","#8514AB","#7D13B1","#7612B6","#6E11BC","#6710C2")
+
 ```
 
 ## Load Census API Key
-
-```{r load_api_key, message=FALSE, warning=FALSE}
-census_api_key("YOUR API KEY", overwrite = TRUE)
-```
 
 # Load the data
 
@@ -95,6 +96,7 @@ Make some simple ggplots with `geom_sf` by mapping the municipalities, the Lanca
 ggplot()+
   geom_sf(data = studyAreaTowns, aes(fill = MUNI))+
   geom_sf(data = uga, fill = "transparent", color = "red")+
+  scale_fill_manual(values=palette, aesthetics="fill")+
   mapTheme()
 ```
 
@@ -138,12 +140,12 @@ bothBuffers <- rbind(insideBuffer, outsideBuffer)
 
 # Map the buffers
 
-Here is a basic plot of the buggers that we have created.
+Here is a basic plot of the buffers that we have created.
 
 ```{r buffer_plot}
 ggplot() + 
   geom_sf(data = bothBuffers, aes(fill = Legend)) +
-  scale_fill_manual(values = c("#F8766D", "#00BFC4")) + 
+  scale_fill_manual(values = c("#F28468", "#7350CF")) + 
   labs(title = "1/8mi buffer inside & outside UGA") +
   mapTheme()
 ```
@@ -154,6 +156,7 @@ ggplot() +
 buffersAndTowns <- 
   st_intersection(st_make_valid(studyAreaTowns), bothBuffers) %>%
   filter(MUNI != "MOUNTVILLE BOROUGH")
+
 ```
 
 # Mapping Challenge 1
@@ -167,3 +170,17 @@ Consider how you might label objects in your map using
 Think about ways to manipulate the `studyAreaTowns` data inside that text geom to make it more legible.
 
 Put all this code into a markdown chunk that runs correctly and allows this markdown to `knit`. Then see if you can manipulate the chunk options so that there aren't annoying warnings and other messages you don't want showing up in an assignment.
+
+```{r nicebuffers}
+
+ggplot() +
+  geom_sf(data=st_union(studyAreaTowns))+
+  geom_sf(data=buffersAndTowns %>% dplyr::filter(Legend == "Inside"), aes(fill=MUNI), alpha = 1, show.legend = FALSE) +
+  geom_sf(data=buffersAndTowns %>% dplyr::filter(Legend == "Outside"), aes(fill=MUNI), alpha = 0.3, show.legend = FALSE) +
+  #geom_sf_text(data = studyAreaTowns %>% dplyr::filter(MUNI != "MOUNTVILLE BOROUGH"), 
+  #                                  aes(label = MUNI), size = 3) +
+  geom_sf_label(data=buffersAndTowns %>% dplyr::filter(MUNI != "MOUNTVILLE BOROUGH"), aes(label= str_remove(MUNI, "TOWNSHIP")), size = 2) +
+  theme_classic()
+  
+  #str_trunc(studyAreaTowns$, width, side = c("right", "left", "center"), ellipsis = "...")
+```

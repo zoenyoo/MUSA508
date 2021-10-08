@@ -38,3 +38,4 @@ insideTracts <- st_centroid(tracts17)[studyAreaTowns,] %>%
 Make a map of population density in Lancaster - either within the UGB, or as it relates to proximity to the UGB, or at the county level generally. Do you want to use the quartile functions from last week? If so, you need to add those as chunks in your markdown and run them.
 
 Put that map in a code chunk and render it in a markdown that knits correctly and doesn't have wacky messages and warnings.
+
