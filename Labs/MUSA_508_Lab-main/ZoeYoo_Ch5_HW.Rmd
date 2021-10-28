@@ -2,7 +2,11 @@
 title: 'ML #3 Predictive Policing'
 author: "Zoe Yoo"
 date: "10/22/2021"
-output: html_document
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
@@ -47,19 +51,8 @@ policeBeats <-
 bothPoliceUnits <- rbind(mutate(policeDistricts, Legend = "Police Districts"), 
                          mutate(policeBeats, Legend = "Police Beats"))
 
-burglaries <- 
-  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
-    filter(Primary.Type == "BURGLARY" & Description == "FORCIBLE ENTRY") %>%
-    mutate(x = gsub("[()]", "", Location)) %>%
-    separate(x,into= c("Y","X"), sep=",") %>%
-    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
-    na.omit() %>%
-    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
-    st_transform('ESRI:102271') %>% 
-    distinct()
-
 crimes <- 
-  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2019/w98m-zvie") %>% 
+  read.socrata("https://data.cityofchicago.org/d/w98m-zvie/") %>% 
     filter(Primary.Type == "WEAPONS VIOLATION") %>%
     mutate(x = gsub("[()]", "", Location)) %>%
     separate(x,into= c("Y","X"), sep=",") %>%
@@ -68,6 +61,7 @@ crimes <-
     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
     st_transform('ESRI:102271') %>% 
     distinct()
+
 
 chicagoBoundary <- 
   st_read(file.path(root.dir,"/Chapter5/chicagoBoundary.geojson")) %>%
@@ -174,6 +168,70 @@ neighborhoods <-
   st_read("https://raw.githubusercontent.com/blackmad/neighborhoods/master/chicago.geojson") %>%
   st_transform(st_crs(fishnet)) 
 
+crashes19 <- #vehicle crashes just in 2019 -- doesn't work
+  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/Traffic_Crashes_-_Vehicles.csv") %>% 
+    mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X)) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+liquor <- #all licenses
+  read.socrata("https://data.cityofchicago.org/Community-Economic-Development/Business-Licenses-Current-Liquor-and-Public-Places/nrmj-3kcf") %>% 
+  mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X)) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Liquor_Est")
+
+graffiti <- #just between 2018-19
+  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/311_Graffiti18-19.csv") %>% 
+  mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X))  %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Graffiti_311")
+
+speedcamv <-
+  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/Speed_Camera_Violations_2019.csv") %>% 
+  #https://data.cityofchicago.org/Transportation/Speed-Camera-Violations/hhkd-xvj4/data
+  mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X)) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Speed_Cam_Violations")
+
+redlightv <-
+  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/Red_Light_Camera_Violations.csv") %>% 
+  #https://data.cityofchicago.org/Transportation/Red-Light-Camera-Violations/spqx-js37/data
+  mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Red_Light_Violations")
+
+
+
+majorst <-
+  read_sf("./Major_Streets/Major_Streets.shp") %>% 
+  st_transform('ESRI:102271') %>% 
+  distinct() %>% 
+  mutate(Legend= "Major Streets")
+
 ```
 
 #### How we aggregate a feature to our fishnet
@@ -194,6 +252,31 @@ vars_net <- abandonCars %>%
   na.omit() %>%
   ungroup()
 
+vars_net2 <- liquor %>%
+  st_join(., fishnet, join=st_within) %>%
+  st_drop_geometry() %>%
+  group_by(uniqueID, Legend) %>%
+  summarize(count = n()) %>%
+  full_join(fishnet, by = "uniqueID") %>%
+  spread(Legend, count, fill=0) %>%
+  st_sf() %>%
+  dplyr::select(-`<NA>`) %>%
+  na.omit() %>%
+  ungroup()
+
+vars_net3 <- graffiti %>%
+  st_join(., fishnet, join=st_within) %>%
+  st_drop_geometry() %>%
+  group_by(uniqueID, Legend) %>%
+  summarize(count = n()) %>%
+  full_join(fishnet, by = "uniqueID") %>%
+  spread(Legend, count, fill=0) %>%
+  st_sf() %>%
+  dplyr::select(-`<NA>`) %>%
+  na.omit() %>%
+  ungroup()
+
+
 # vars_net <- abandonCars %>%
 #   spatially join abandonCars points to the fishnet polygon they are within %>%
 #   drop the geometry attribute %>%
@@ -207,6 +290,31 @@ vars_net <- abandonCars %>%
 #   remove grouping so you are not tripped up later
 ```
 
+
+```{r}
+
+ggplot() +
+  geom_sf(data=chicagoBoundary, show.legend = NA, color='black', lwd=0.1, alpha=.3)+
+  geom_sf(data = crimes, aes(), 
+          show.legend = "point", size = 0.3, color='red')+
+  mapTheme()+
+  labs(title="2019 _ Crimes", 
+       subtitle="Chicago, IL", 
+       caption="Figure 2.4")
+
+ggplot()+
+  geom_sf(data=chicagoBoundary, show.legend = NA, color='black', lwd=0.1, alpha=.3)+
+  geom_sf(data = crimes20, aes(), 
+          show.legend = "point", size = 0.3, color='red')+
+  mapTheme()+
+  labs(title="2020 _ Crimes", 
+       subtitle="Chicago, IL", 
+       caption="Figure 2.4")
+  
+
+
+```
+
 ## Nearest Neighbor Feature
 
 > Review: what is NN and what does `k` represent in this function?
@@ -216,11 +324,21 @@ vars_net <- abandonCars %>%
 st_c    <- st_coordinates
 st_coid <- st_centroid
 
-## create NN from abandoned cars
+## create NN from abandoned cars, liquor establishments, crashes, and graffiti
 vars_net <- vars_net %>%
-    mutate(Abandoned_Cars.nn = nn_function(st_c(st_coid(vars_net)), 
+  mutate(Abandoned_Cars.nn = nn_function(st_c(st_coid(vars_net)), 
                                            st_c(abandonCars),
+                                           k = 3)) %>% 
+  mutate(liquor.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(liquor),
+                                           k = 3)) %>% 
+  mutate(graffiti.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(graffiti),
+                                           k = 3)) %>% 
+  mutate(speedcam.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(speedcamv),
                                            k = 3))
+
 ```
 
 > What changes if we make `k` a different number?
@@ -232,10 +350,11 @@ vars_net.long.nn <-
     gather(Variable, value, -geometry)
 
 ggplot() +
-      geom_sf(data = vars_net.long.nn, aes(fill=value), colour=NA) +
+      geom_sf(data = vars_net.long.nn , aes(fill=value), colour=NA) +
+      facet_wrap(~Variable)+
       scale_fill_viridis(name="NN Distance") +
-      labs(title="Abandoned Car NN Distance") +
-      mapTheme()
+      labs(title="_ NN Distance") +
+      mapTheme() 
 ```
 
 ## Join NN feature to our fishnet
@@ -294,14 +413,14 @@ final_net.weights <- nb2listw(final_net.nb, style="W", zero.policy=TRUE)
 
 ```{r}
 ## see ?localmoran
-local_morans <- localmoran(final_net$Abandoned_Cars, final_net.weights, zero.policy=TRUE) %>% 
+local_morans <- localmoran(final_net$crimes, final_net.weights, zero.policy=TRUE) %>% 
   as.data.frame()
 
 # join local Moran's I results to fishnet
 final_net.localMorans <- 
   cbind(local_morans, as.data.frame(final_net)) %>% 
   st_sf() %>%
-  dplyr::select(Abandoned_Cars_Count = Abandoned_Cars, 
+  dplyr::select(Crime_Count = crimes, 
                 Local_Morans_I = Ii, 
                 P_Value = `Pr(z != E(Ii))`) %>%
   mutate(Significant_Hotspots = ifelse(P_Value <= 0.001, 1, 0)) %>%
