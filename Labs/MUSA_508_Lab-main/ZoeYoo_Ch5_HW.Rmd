@@ -1,7 +1,7 @@
 ---
-title: 'ML #3 Predictive Policing'
+title: 'Homework 3: Risk Modeling'
 author: "Zoe Yoo"
-date: "10/22/2021"
+date: "10/29/2021"
 output: 
   html_document: 
     toc: true
@@ -9,7 +9,7 @@ output:
     code_folding: hide
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, message = FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
 
 library(tidyverse)
@@ -31,13 +31,11 @@ source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-L
 
 ```
 
-## Read in Data from Chicago
+## 1.1 Read in Data from Chicago
 
-This uses the Socrata package for some data sets.
+Using the Socrata package and the Chicago OpenData website, I pull the police districts of Chicago, its police beats, Chicago boundary information, and the data on my selected crime. As the homework specified to use a crime that has more selection bias than burglaries, I chose to examine assaults (pulled just from 2019). Assault is often underreported because people choose not to contact the police about it, whether due to fear of retaliation from the perpetrator or a lack of concern (seeing it as "just" a fight, or dismissing it due to gender). Police may have more discretion over whether to actually arrest someone for assault, while burglary is more obviously malicious. 
 
-Note where we bring in burglary data - you will want to vary this part to do your homework!
-
-```{r}
+```{r, message = FALSE, results=FALSE}
 policeDistricts <- 
   st_read("https://data.cityofchicago.org/api/geospatial/fthy-xz3r?method=export&format=GeoJSON") %>%
   st_transform('ESRI:102271') %>%
@@ -53,7 +51,7 @@ bothPoliceUnits <- rbind(mutate(policeDistricts, Legend = "Police Districts"),
 
 crimes <- 
   read.socrata("https://data.cityofchicago.org/d/w98m-zvie/") %>% 
-    filter(Primary.Type == "WEAPONS VIOLATION") %>%
+    filter(Primary.Type == "ASSAULT") %>%
     mutate(x = gsub("[()]", "", Location)) %>%
     separate(x,into= c("Y","X"), sep=",") %>%
     mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
@@ -62,27 +60,21 @@ crimes <-
     st_transform('ESRI:102271') %>% 
     distinct()
 
-
 chicagoBoundary <- 
   st_read(file.path(root.dir,"/Chapter5/chicagoBoundary.geojson")) %>%
   st_transform('ESRI:102271') 
 ```
+## 1.2 visualizing point data
 
-## visualizing point data
+The maps below in Figure 1.1 plot the point data of assaults and the overall density (areas with more assaults).
 
-Plotting point data and density
-
-> How do we analyze point data?
->
-> Are there other geometries useful to represent point locations?
-
-```{r fig.width=6, fig.height=4}
+```{r fig.width=8, fig.height=6, message = FALSE}
 # uses grid.arrange to organize indpendent plots
 grid.arrange(ncol=2,
 ggplot() + 
   geom_sf(data = chicagoBoundary) +
-  geom_sf(data = crimes, colour="red", size=0.1, show.legend = "point") +
-  labs(title= "_, Chicago - 2020") +
+  geom_sf(data = crimes, colour="red", size=0.05, show.legend = "point") +
+  labs(title= "Assaults, Chicago - 2019", caption = "Figure 1.1") +
   mapTheme(title_size = 14),
 
 ggplot() + 
@@ -92,19 +84,15 @@ ggplot() +
                  size = 0.01, bins = 40, geom = 'polygon') +
   scale_fill_viridis() +
   scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
-  labs(title = "Density of _") +
+  labs(title = "Density of Assaults")+
   mapTheme(title_size = 14) + theme(legend.position = "none"))
 ```
 
-## Creating a fishnet grid
+## 1.3 Creating a fishnet grid
 
-> What is a fishnet grid?
+I create a "fishnet" to examine data in an aggregate, dividing up Chicago into equally-sized squares; this is shown in Figure 1.3.
 
-The `{sf}` package offers really easy way to create fishnet grids.
-
-Examine the fishnet - the unique ID is crucial to building a data set!
-
-```{r}
+```{r, message = FALSE}
 ## using {sf} to create the grid
 ## Note the `.[chicagoBoundary] %>% ` line. This is needed to clip the grid to our data
 fishnet <- 
@@ -114,27 +102,35 @@ fishnet <-
   .[chicagoBoundary] %>%            # <- MDH Added
   st_sf() %>%
   mutate(uniqueID = rownames(.))
+
+ggplot()+
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  geom_sf(data=fishnet)+
+  labs(title="Fishnet Structure", 
+       subtitle="Chicago, IL", 
+       caption="Figure 1.2")+
+  mapTheme()
 ```
 
-### Aggregate points to the fishnet
+### 1.3.1 Aggregate points to the fishnet
 
-> How can we aggregate points into a fishnet grid?
+Below, in Figure 1.4, is the product of joining the crime points to the fishnet, where crimes have been allocated per cell.
 
-```{r}
+```{r, message = FALSE}
 ## add a value of 1 to each crime, sum them with aggregate
 crime_net <- 
   dplyr::select(crimes) %>% 
-  mutate(countCrimes = 1) %>% 
+  mutate(countBurglaries = 1) %>% 
   aggregate(., fishnet, sum) %>%
-  mutate(countCrimes = replace_na(countCrimes, 0),
+  mutate(countBurglaries = replace_na(countBurglaries, 0),
          uniqueID = rownames(.),
          cvID = sample(round(nrow(fishnet) / 24), 
                        size=nrow(fishnet), replace = TRUE))
 
 ggplot() +
-  geom_sf(data = crime_net, aes(fill = countCrimes), color = NA) +
+  geom_sf(data = crime_net, aes(fill = countBurglaries), color = NA) +
   scale_fill_viridis() +
-  labs(title = "Count of _ for the fishnet") +
+  labs(title = "Count of Assaults for the fishnet", caption = "Figure 1.3") +
   mapTheme()
 
 # For demo. requires updated mapview package
@@ -143,78 +139,33 @@ ggplot() +
 # xx + yy
 ```
 
-## Modeling Spatial Features
+## 2.1 Modeling Spatial Features
 
-> What features would be helpful in predicting the location of burglaries?
->
-> What might these features be problematic?
->
-> hint: for all the reasons we learned in class
+For possible features that might work as "risk factors," I pulled various 2019 point data from the City of Chicago OpenData portal, including information on abandoned cars, abandoned or vacant buildings, graffiti complains, street and alley light malfunction complaints, and sanitation complaints from the 311 database. I also pulled environmental factor complaints and liquor license information, mainly for liquor stores and places where liquor is consumed on-site (taverns, restaurant patios, "late hour" establishments, etc.).
 
-```{r}
+These factors are plotted below with simple points; it is clear that there is a large contrast in the number of points reported for different variables, like lights out complaints and abandoned buildings.
+
+### 2.1.1 Spatial Features, Chicago, 2019
+
+```{r, message = FALSE, results=FALSE}
+## Neighborhoods to use in LOOCV in a bit
+neighborhoods <- 
+  st_read("https://raw.githubusercontent.com/blackmad/neighborhoods/master/chicago.geojson") %>%
+  st_transform(st_crs(fishnet)) 
+
 ## only pulling a single variable for our model to keep it simple
 ## using Socrata again
 abandonCars <- 
   read.socrata("https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Abandoned-Vehicles/3c9v-pnva") %>%
-    mutate(year = substr(creation_date,1,4)) %>% filter(year == "2017") %>%
+    mutate(year = substr(creation_date,1,4)) %>% filter(year == "2019") %>%
     dplyr::select(Y = latitude, X = longitude) %>%
     na.omit() %>%
     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
     st_transform(st_crs(fishnet)) %>%
     mutate(Legend = "Abandoned_Cars")
 
-## Neighborhoods to use in LOOCV in a bit
-neighborhoods <- 
-  st_read("https://raw.githubusercontent.com/blackmad/neighborhoods/master/chicago.geojson") %>%
-  st_transform(st_crs(fishnet)) 
-
-crashes19 <- #vehicle crashes just in 2019 -- doesn't work
-  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/Traffic_Crashes_-_Vehicles.csv") %>% 
-    mutate(x = gsub("[()]", "", LOCATION)) %>%
-    separate(x,into= c("Y","X"), sep=",") %>%
-    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
-    subset(!is.na(X)) %>%
-    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
-    st_transform('ESRI:102271') %>% 
-    distinct()
-
-liquor <- #all licenses
-  read.socrata("https://data.cityofchicago.org/Community-Economic-Development/Business-Licenses-Current-Liquor-and-Public-Places/nrmj-3kcf") %>% 
-  mutate(x = gsub("[()]", "", LOCATION)) %>%
-    separate(x,into= c("Y","X"), sep=",") %>%
-    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
-    subset(!is.na(X)) %>%
-    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
-    st_transform('ESRI:102271') %>% 
-    distinct() %>% 
-  mutate(Legend = "Liquor_Est")
-
-graffiti <- #just between 2018-19
-  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/311_Graffiti18-19.csv") %>% 
-  mutate(x = gsub("[()]", "", LOCATION)) %>%
-    separate(x,into= c("Y","X"), sep=",") %>%
-    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
-    subset(!is.na(X))  %>%
-    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
-    st_transform('ESRI:102271') %>% 
-    distinct() %>% 
-  mutate(Legend = "Graffiti_311")
-
-speedcamv <-
-  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/Speed_Camera_Violations_2019.csv") %>% 
-  #https://data.cityofchicago.org/Transportation/Speed-Camera-Violations/hhkd-xvj4/data
-  mutate(x = gsub("[()]", "", LOCATION)) %>%
-    separate(x,into= c("Y","X"), sep=",") %>%
-    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
-    subset(!is.na(X)) %>%
-    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
-    st_transform('ESRI:102271') %>% 
-    distinct() %>% 
-  mutate(Legend = "Speed_Cam_Violations")
-
-redlightv <-
-  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/Red_Light_Camera_Violations.csv") %>% 
-  #https://data.cityofchicago.org/Transportation/Red-Light-Camera-Violations/spqx-js37/data
+abandonBuildings <- 
+  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/311_Service_Requests-Abandoned_buildings.csv") %>% 
   mutate(x = gsub("[()]", "", LOCATION)) %>%
     separate(x,into= c("Y","X"), sep=",") %>%
     mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
@@ -222,60 +173,138 @@ redlightv <-
     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
     st_transform('ESRI:102271') %>% 
     distinct() %>% 
-  mutate(Legend = "Red_Light_Violations")
+  mutate(Legend = "Abandoned_Buildings")
 
+graffiti <- 
+   read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/311_Graffiti18-19.csv") %>% 
+  mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X)) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Graffiti")
 
+lightsOut <-  #both alley and streets out
+   read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/311_Service_Requests-lights-out.csv") %>% 
+  mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X)) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Lights_Out")
 
-majorst <-
-  read_sf("./Major_Streets/Major_Streets.shp") %>% 
-  st_transform('ESRI:102271') %>% 
-  distinct() %>% 
-  mutate(Legend= "Major Streets")
+liquorRetail <- 
+  read.socrata("https://data.cityofchicago.org/resource/nrmj-3kcf.json") %>%  
+    filter(business_activity == "Retail Sales of Packaged Liquor") %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Liquor_Retail")
 
+liquorSite <- 
+  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/Liquor_onSite.csv") %>%  
+    mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X)) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Liquor_OnSite")
+  
+sanitation <- #sanitation code violation
+  read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/MUSA_508_Lab-main/311_Service_Requests_scb.csv") %>%  
+    mutate(x = gsub("[()]", "", LOCATION)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    subset(!is.na(X)) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% 
+  mutate(Legend = "Sanitation")
+    
+environment <- 
+  read.socrata("https://data.cityofchicago.org/Environment-Sustainable-Development/CDPH-Environmental-Complaints/fypr-ksnz") %>%
+    mutate(year = substr(complaint_date,1,4)) %>% filter(year == "2019") %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Environment")
 ```
-
-#### How we aggregate a feature to our fishnet
-
-This is an important chunk of code with some unfamiliar lines. We'll step through it.
 
 ```{r}
 
-vars_net <- abandonCars %>%
+grid.arrange(ncol=4,nrow=2,
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = abandonCars, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Abandoned Cars") +
+  mapTheme(title_size = 10),
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = abandonBuildings, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Abandoned Buildings") +
+  mapTheme(title_size = 10),
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = graffiti, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Graffiti Complaints") +
+  mapTheme(title_size = 10),
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = lightsOut, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Alley/Street Lights Out") +
+  mapTheme(title_size = 10),
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = liquorRetail, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Liquor Stores", caption = "Figure 2.1") +
+  mapTheme(title_size = 10),
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = liquorSite, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Liquor On-Site Consumption") +
+  mapTheme(title_size = 10),
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = sanitation, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Sanitation Complaints") +
+  mapTheme(title_size = 10),
+  ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = environment, colour="black", size=0.1, show.legend = "point") +
+  labs(title= "Environmental Complaints") +
+  mapTheme(title_size = 10))
+
+```
+
+### 2.1.2 Joining Data to the Fishnet
+
+```{r, message = FALSE}
+
+vars_net <- 
+  rbind(abandonCars, liquorRetail, environment,
+        dplyr::select(graffiti,Legend),
+        dplyr::select(abandonBuildings,Legend),
+        dplyr::select(lightsOut,Legend),
+        dplyr::select(liquorSite,Legend),
+        dplyr::select(sanitation,Legend)) %>%
   st_join(., fishnet, join=st_within) %>%
   st_drop_geometry() %>%
   group_by(uniqueID, Legend) %>%
   summarize(count = n()) %>%
-  full_join(fishnet, by = "uniqueID") %>%
-  spread(Legend, count, fill=0) %>%
-  st_sf() %>%
-  dplyr::select(-`<NA>`) %>%
-  na.omit() %>%
-  ungroup()
-
-vars_net2 <- liquor %>%
-  st_join(., fishnet, join=st_within) %>%
-  st_drop_geometry() %>%
-  group_by(uniqueID, Legend) %>%
-  summarize(count = n()) %>%
-  full_join(fishnet, by = "uniqueID") %>%
-  spread(Legend, count, fill=0) %>%
-  st_sf() %>%
-  dplyr::select(-`<NA>`) %>%
-  na.omit() %>%
-  ungroup()
-
-vars_net3 <- graffiti %>%
-  st_join(., fishnet, join=st_within) %>%
-  st_drop_geometry() %>%
-  group_by(uniqueID, Legend) %>%
-  summarize(count = n()) %>%
-  full_join(fishnet, by = "uniqueID") %>%
-  spread(Legend, count, fill=0) %>%
-  st_sf() %>%
-  dplyr::select(-`<NA>`) %>%
-  na.omit() %>%
-  ungroup()
-
+    full_join(fishnet) %>%
+    spread(Legend, count, fill=0) %>%
+    st_sf() %>%
+    dplyr::select(-`<NA>`) %>%
+    na.omit() %>%
+    ungroup()
 
 # vars_net <- abandonCars %>%
 #   spatially join abandonCars points to the fishnet polygon they are within %>%
@@ -290,60 +319,45 @@ vars_net3 <- graffiti %>%
 #   remove grouping so you are not tripped up later
 ```
 
+## 3.1 Feature Engineering
 
-```{r}
+Here, we use the nearest neighbor function to find the average distance to the nearest three neighbors of each point, which is then joined to the fishnet. Next, Figure 2.2 plots these for each risk variable. 
 
-ggplot() +
-  geom_sf(data=chicagoBoundary, show.legend = NA, color='black', lwd=0.1, alpha=.3)+
-  geom_sf(data = crimes, aes(), 
-          show.legend = "point", size = 0.3, color='red')+
-  mapTheme()+
-  labs(title="2019 _ Crimes", 
-       subtitle="Chicago, IL", 
-       caption="Figure 2.4")
-
-ggplot()+
-  geom_sf(data=chicagoBoundary, show.legend = NA, color='black', lwd=0.1, alpha=.3)+
-  geom_sf(data = crimes20, aes(), 
-          show.legend = "point", size = 0.3, color='red')+
-  mapTheme()+
-  labs(title="2020 _ Crimes", 
-       subtitle="Chicago, IL", 
-       caption="Figure 2.4")
-  
-
-
-```
-
-## Nearest Neighbor Feature
-
-> Review: what is NN and what does `k` represent in this function?
-
-```{r}
+```{r, message = FALSE}
 # convinience to reduce length of function names.
 st_c    <- st_coordinates
 st_coid <- st_centroid
 
 ## create NN from abandoned cars, liquor establishments, crashes, and graffiti
 vars_net <- vars_net %>%
-  mutate(Abandoned_Cars.nn = nn_function(st_c(st_coid(vars_net)), 
+  mutate(abandonCars.nn = nn_function(st_c(st_coid(vars_net)), 
                                            st_c(abandonCars),
                                            k = 3)) %>% 
-  mutate(liquor.nn = nn_function(st_c(st_coid(vars_net)), 
-                                           st_c(liquor),
+  mutate(abandonBuildings.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(abandonBuildings),
                                            k = 3)) %>% 
   mutate(graffiti.nn = nn_function(st_c(st_coid(vars_net)), 
                                            st_c(graffiti),
                                            k = 3)) %>% 
-  mutate(speedcam.nn = nn_function(st_c(st_coid(vars_net)), 
-                                           st_c(speedcamv),
+  mutate(lightsOut.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(lightsOut),
+                                           k = 3)) %>% 
+  mutate(liquorRetail.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(liquorRetail),
+                                           k = 3)) %>% 
+  mutate(liquorSite.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(liquorSite),
+                                           k = 3)) %>% 
+  mutate(sanitation.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(sanitation),
+                                           k = 3)) %>% 
+  mutate(environment.nn = nn_function(st_c(st_coid(vars_net)), 
+                                           st_c(environment),
                                            k = 3))
 
 ```
 
-> What changes if we make `k` a different number?
-
-```{r}
+```{r, fig.dim=c(8,6), message = FALSE}
 ## Visualize the NN feature
 vars_net.long.nn <- 
   dplyr::select(vars_net, ends_with(".nn")) %>%
@@ -351,30 +365,14 @@ vars_net.long.nn <-
 
 ggplot() +
       geom_sf(data = vars_net.long.nn , aes(fill=value), colour=NA) +
-      facet_wrap(~Variable)+
+      facet_wrap(~Variable, nrow=2)+
       scale_fill_viridis(name="NN Distance") +
-      labs(title="_ NN Distance") +
+      labs(title="Nearest Neighbors Distance (ft)", caption = "Figure 3.1") +
       mapTheme() 
-```
 
-## Join NN feature to our fishnet
-
-Since the counts were aggregated to each cell by `uniqueID` we can use that to join the counts to the fishnet.
-
-```{r}
 ## important to drop the geometry from joining features
 final_net <-
-  left_join(crime_net, st_drop_geometry(vars_net), by="uniqueID") 
-
-```
-
-### Join in areal data
-
-Using spatial joins to join *centroids* of fishnets to polygon for neighborhoods and districts.
-
-> What issues arise when we try to join polygons to polygons in space?
-
-```{r}
+  left_join(crime_net, st_drop_geometry(vars_net), by="uniqueID")
 
 final_net <-
   st_centroid(final_net) %>%
@@ -382,45 +380,46 @@ final_net <-
     st_join(dplyr::select(policeDistricts, District), by = "uniqueID") %>%
       st_drop_geometry() %>%
       left_join(dplyr::select(final_net, geometry, uniqueID)) %>%
-      st_sf() %>%
+      st_sf() %>% 
   na.omit()
 
-# for live demo
-# mapview::mapview(final_net, zcol = "District")
 ```
 
-## Local Moran's I for fishnet grid cells
+Figure 3.2 shows the distribution of assaults by police district, the polygons of which I also pulled from Chicago OpenData.
 
-using {spdep} package to to build neighborhood weights and list to calculate local Moran's I.
+```{r, message = FALSE}
+ggplot(final_net, aes(District)) + 
+    geom_bar() +
+    labs(title="Distribution of Crimes by District", caption = "Figure 3.2",
+         x="District Number", y="Count") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  plotTheme()
+```
 
-Note that the code here is *different* than in the book - it has been updated to keep up with changes in packages.
+## 3.2 Local Moran's I for fishnet grid cells
 
-> What is the difference between local and global Moran's I?
+The below plots (in Figure 3.3) illustrate the local Moran's I for each variable, which were built using neighborhood weights.
 
-A little in depth version of the chunk below can be found:
-
-Mendez C. (2020). Spatial autocorrelation analysis in R. R Studio/RPubs. Available at <https://rpubs.com/quarcs-lab/spatial-autocorrelation>
-
-```{r}
+```{r, message = FALSE}
 ## generates warnings from PROJ issues
 ## {spdep} to make polygon to neighborhoods... 
 final_net.nb <- poly2nb(as_Spatial(final_net), queen=TRUE)
 ## ... and neighborhoods to list of weigths
 final_net.weights <- nb2listw(final_net.nb, style="W", zero.policy=TRUE)
 
-# print(final_net.weights, zero.policy=TRUE)
+#print(final_net.weights, zero.policy=TRUE)
 ```
 
-```{r}
+```{r, message = FALSE}
 ## see ?localmoran
-local_morans <- localmoran(final_net$crimes, final_net.weights, zero.policy=TRUE) %>% 
+local_morans <- localmoran(final_net$countBurglaries, final_net.weights, zero.policy=TRUE) %>% 
   as.data.frame()
 
 # join local Moran's I results to fishnet
 final_net.localMorans <- 
   cbind(local_morans, as.data.frame(final_net)) %>% 
   st_sf() %>%
-  dplyr::select(Crime_Count = crimes, 
+  dplyr::select(Crime_Count = countBurglaries, 
                 Local_Morans_I = Ii, 
                 P_Value = `Pr(z != E(Ii))`) %>%
   mutate(Significant_Hotspots = ifelse(P_Value <= 0.001, 1, 0)) %>%
@@ -428,13 +427,7 @@ final_net.localMorans <-
   
 ```
 
-### Plotting local Moran's I results
-
-This is a complex code chunk - it's a loop which builds ggplots of local Moran's for each of your `vars`
-
-> What does a significant hot spot tell us about the distribution of burglaries?
-
-```{r}
+```{r, message = FALSE}
 ## This is just for plotting
 vars <- unique(final_net.localMorans$Variable)
 varList <- list()
@@ -448,14 +441,15 @@ for(i in vars){
       labs(title=i) +
       mapTheme(title_size = 14) + theme(legend.position="bottom")}
 
-do.call(grid.arrange,c(varList, ncol = 4, top = "Local Morans I statistics, _"))
+do.call(grid.arrange,c(varList, ncol = 4, top = "Local Moran's I Statistics"))
 ```
+*Figure 3.3*
 
-## Distance to Hot spot
+## 3.3 Correlation Tests
 
-Using NN distance to a hot spot location
+Figure 3.4 contains multiple scatterplots for all the possible correlating risk factors, which aids in choosing which to incorporate into the model.
 
-```{r}
+```{r, message = FALSE}
 # generates warning from NN
 final_net <- final_net %>% 
   mutate(abandoned.isSig = 
@@ -469,69 +463,183 @@ final_net <- final_net %>%
 ## What does k = 1 represent?
 ```
 
-> What does `k = 1` above mean in terms of measuring nearest neighbors?
+```{r, message = FALSE}
 
-### Plot NN distance to hot spot
+correlation.long <-
+  st_drop_geometry(final_net) %>%
+    dplyr::select(-uniqueID, -cvID, -name, -District, -abandoned.isSig, -abandoned.isSig.dist) %>%
+    gather(Variable, Value, -countBurglaries)
 
-```{r}
-ggplot() +
-      geom_sf(data = final_net, aes(fill=abandoned.isSig.dist), colour=NA) +
-      scale_fill_viridis(name="NN Distance") +
-      labs(title="Abandoned Car NN Distance") +
-      mapTheme()
+correlation.cor <-
+  correlation.long %>%
+    group_by(Variable) %>%
+    summarize(correlation = cor(Value, countBurglaries, use = "complete.obs"))
+    
+ggplot(correlation.long, aes(Value, countBurglaries)) +
+  geom_point(size = 0.1) +
+  geom_text(data = correlation.cor, aes(label = paste("r =", round(correlation, 2))),
+            x=-Inf, y=Inf, vjust = 1.5, hjust = -.1) +
+  geom_smooth(method = "lm", se = FALSE, colour = "black") +
+  facet_wrap(~Variable, ncol = 4, scales = "free") +
+  labs(title = "Assault count as a function of risk factors", caption = "Figure 3.4") +
+  plotTheme()
+
 ```
+## 3.4 Accuracy
 
-## Modeling and CV
+### 3.4.1 Mean Absolute Error Histogram
 
-Leave One Group Out CV on spatial features
+The table below, as well as Figure 3.6, illustrate mean absolute error and the standard deviation of mean absolute error per regression.
 
-```{r sults='hide'}
+```{r, message = FALSE, results=FALSE, warning=FALSE}
+# calculate errors by NEIGHBORHOOD
+reg.vars <- c("abandonCars.nn", "abandonBuildings.nn", "graffiti.nn","lightsOut.nn", 
+              "liquorRetail.nn", "liquorSite.nn", "sanitation.nn", 
+              "environment.nn")
 
-# View(crossValidate)
-
-## define the variables we want
-reg.ss.vars <- c("Abandoned_Cars.nn", "abandoned.isSig.dist")
+reg.ss.vars <- c("abandonCars.nn", "abandonBuildings.nn", "graffiti.nn","lightsOut.nn",
+              "liquorRetail.nn", "liquorSite.nn", "sanitation.nn", 
+              "environment.nn", "abandoned.isSig.dist")
 
 ## RUN REGRESSIONS
+reg.cv <- crossValidate(
+  dataset = final_net,
+  id = "cvID",
+  dependentVariable = "countBurglaries",
+  indVariables = reg.vars) %>%
+    dplyr::select(cvID = cvID, countBurglaries, Prediction, geometry)
+
+reg.ss.cv <- crossValidate(
+  dataset = final_net,
+  id = "cvID",
+  dependentVariable = "countBurglaries",
+  indVariables = reg.ss.vars) %>%
+    dplyr::select(cvID = cvID, countBurglaries, Prediction, geometry)
+  
+reg.spatialCV <- crossValidate(
+  dataset = final_net,
+  id = "name",
+  dependentVariable = "countBurglaries",
+  indVariables = reg.vars) %>%
+    dplyr::select(cvID = name, countBurglaries, Prediction, geometry)
+
 reg.ss.spatialCV <- crossValidate(
   dataset = final_net,
-  id = "name",                           
-  dependentVariable = "countCrimes",
+  id = "name",
+  dependentVariable = "countBurglaries",
   indVariables = reg.ss.vars) %>%
-    dplyr::select(cvID = name, countCrimes, Prediction, geometry)
-```
+    dplyr::select(cvID = name, countBurglaries, Prediction, geometry)
 
-```{r}
-# calculate errors by NEIGHBORHOOD
+
+reg.summary <- 
+  rbind(
+    mutate(reg.cv,           Error = Prediction - countBurglaries,
+                             Regression = "Random k-fold CV: Just Risk Factors"),
+                             
+    mutate(reg.ss.cv,        Error = Prediction - countBurglaries,
+                             Regression = "Random k-fold CV: Spatial Process"),
+    
+    mutate(reg.spatialCV,    Error = Prediction - countBurglaries,
+                             Regression = "Spatial LOGO-CV: Just Risk Factors"),
+                             
+    mutate(reg.ss.spatialCV, Error = Prediction - countBurglaries,
+                             Regression = "Spatial LOGO-CV: Spatial Process")) %>%
+    st_sf() 
+
 error_by_reg_and_fold <- 
-  reg.ss.spatialCV %>%
-    group_by(cvID) %>% 
-    summarize(Mean_Error = mean(Prediction - countCrimes, na.rm = T),
+  reg.summary %>%
+    group_by(Regression, cvID) %>% 
+    summarize(Mean_Error = mean(Prediction - countBurglaries, na.rm = T),
               MAE = mean(abs(Mean_Error), na.rm = T),
               SD_MAE = mean(abs(Mean_Error), na.rm = T)) %>%
   ungroup()
 
-error_by_reg_and_fold %>% 
-  arrange(desc(MAE))
-error_by_reg_and_fold %>% 
-  arrange(MAE)
 
-## plot histogram of OOF (out of fold) errors
+```
+
+```{r}
 error_by_reg_and_fold %>%
   ggplot(aes(MAE)) + 
     geom_histogram(bins = 30, colour="black", fill = "#FDE725FF") +
-  scale_x_continuous(breaks = seq(0, 11, by = 1)) + 
-    labs(title="Distribution of MAE", subtitle = "LOGO-CV",
-         x="Mean Absolute Error", y="Count") 
+    facet_wrap(~Regression) +  
+    geom_vline(xintercept = 0) + scale_x_continuous(breaks = seq(0, 8, by = 1)) + 
+    labs(title="Distribution of MAE", subtitle = "k-fold cross validation vs. LOGO-CV",
+         x="Mean Absolute Error", y="Count", caption = "Figure 3.5") +
+    plotTheme()
+```
+### 3.4.2 MAE Table
+
+```{r, message = FALSE}
+
+st_drop_geometry(error_by_reg_and_fold) %>%
+  group_by(Regression) %>% 
+    summarize(Mean_MAE = round(mean(MAE), 2),
+              SD_MAE = round(sd(MAE), 2)) %>%
+  kable(caption = "Figure 3.6") %>%
+    kable_styling("striped", full_width = F) %>%
+    row_spec(2, color = "black", background = "#FDE725FF") %>%
+    row_spec(4, color = "black", background = "#FDE725FF") 
+
 ```
 
-## Density vs predictions
+### 3.4.3 Multiple Mapping Error by Regression Type
 
-The `spatstat` function gets us kernal density estimates with varying search radii.
+In Figure 3.7, the errors for spatial LOGO-CV regression are compared to the errors from the random k-fold regression.
 
-Note that the code here is *different* than in the book - it has been updated to keep up with changes in packages.
+```{r,message = FALSE}
+grid.arrange(nrow=1,
+  ggplot(error_by_reg_and_fold %>% filter(str_detect(Regression, "LOGO"))) +
+    geom_sf(aes(fill = MAE)) +
+    facet_wrap(~Regression) +
+    scale_fill_viridis() +
+    labs(title = "Assault errors by LOGO-CV Regression", caption="Figure 3.7") +
+    mapTheme(title_size = 12) + theme(legend.position="bottom"),
+  
+  ggplot(error_by_reg_and_fold %>% filter(str_detect(Regression, "k-fold"))) +
+    geom_sf(aes(fill = MAE)) +
+    facet_wrap(~Regression) +
+    scale_fill_viridis() +
+    labs(title = "Assault errors by k-fold Regression", caption = " ") +
+    mapTheme(title_size = 12) + theme(legend.position="bottom"))
+```
+### 3.4.4 Error by Race Context
+
+```{r, message = FALSE, results=FALSE}
+
+tracts19 <- 
+  get_acs(geography = "tract", variables = c("B01001_001E","B01001A_001E"), 
+          year = 2019, state=17, county=031, geometry=T) %>%
+  st_transform('ESRI:102271')  %>% 
+  dplyr::select(variable, estimate, GEOID) %>%
+  spread(variable, estimate) %>%
+  rename(TotalPop = B01001_001,
+         NumberWhites = B01001A_001) %>%
+  mutate(percentWhite = NumberWhites / TotalPop,
+         raceContext = ifelse(percentWhite > .5, "Majority_White", "Majority_Non_White")) %>%
+  .[neighborhoods,]
+
+```
 
 ```{r}
+reg.summary %>% 
+    st_centroid() %>%
+    st_join(tracts19) %>%
+    na.omit() %>%
+      st_drop_geometry() %>%
+      group_by(Regression, raceContext) %>%
+      summarize(mean.Error = mean(Error, na.rm = T)) %>%
+      spread(raceContext, mean.Error) %>%
+      kable(caption = "Figure 3.8 - Mean Error by Neighborhood Racial Context") %>%
+        kable_styling("striped", full_width = F)  
+
+```
+
+
+## 4.1 Kernel Density Estimates
+
+Kernel density is another way to measure density of crimes, that is based on the occurence of nearby points under a defined curve. In Figure 4.1, kernel density is shown for our Chicago assault 2019 data for a curve of 1000 feet.
+
+```{r,message = FALSE}
 # demo of kernel width
 crim_ppp <- as.ppp(st_coordinates(crimes), W = st_bbox(final_net))
 crim_KD.1000 <- spatstat.core::density.ppp(crim_ppp, 1000)
@@ -544,50 +652,38 @@ crim_KD.df <- rbind(
 
 crim_KD.df$Legend <- factor(crim_KD.df$Legend, levels = c("1000 Ft.", "1500 Ft.", "2000 Ft."))
 
-ggplot(data=crim_KD.df, aes(x=x, y=y)) +
-  geom_raster(aes(fill=layer)) + 
-  facet_wrap(~Legend) +
-  coord_sf(crs=st_crs(final_net)) + 
-  scale_fill_viridis(name="Density") +
-  labs(title = "Kernel density with 3 different search radii") +
-  mapTheme(title_size = 14)
-```
-
-```{r}
-
-as.data.frame(burg_KD.1000) %>%
+as.data.frame(crim_KD.1000) %>%
   st_as_sf(coords = c("x", "y"), crs = st_crs(final_net)) %>%
   aggregate(., final_net, mean) %>%
    ggplot() +
      geom_sf(aes(fill=value)) +
      geom_sf(data = sample_n(crimes, 1500), size = .5) +
      scale_fill_viridis(name = "Density") +
-     labs(title = "Kernel density of 2017 _") +
+     labs(title = "Kernel density of 2019 Assaults", caption = "Figure 4.1") +
      mapTheme(title_size = 14)
+
 ```
 
-## Get 2018 crime data
+## 4.2 Comparing with 2020 Crime Data
 
-Let's see how our model performed relative to KD on the following year's data.
+Here, I compare how the spatial process, spatial LOGO-CV model performs relative to kernel density on the assault data from 2020. Figure 4.2 maps this relationship, while Figure 4.3 illustrates the rate of crimes by risk category, both for kernel density and risk predictions.
 
-```{r}
-burglaries18 <- 
-  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2018/3i3m-jwuy") %>% 
-  filter(Primary.Type == "BURGLARY" & 
-         Description == "FORCIBLE ENTRY") %>%
-  mutate(x = gsub("[()]", "", Location)) %>%
-  separate(x,into= c("Y","X"), sep=",") %>%
-  mutate(X = as.numeric(X),
-         Y = as.numeric(Y)) %>% 
-  na.omit %>%
-  st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
-  st_transform('ESRI:102271') %>% 
-  distinct() %>%
-  .[fishnet,]
-```
+```{r, message = FALSE}
 
-```{r}
-burg_KDE_sf <- as.data.frame(burg_KD.1000) %>%
+crimes20 <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2020/qzdf-xmn8") %>% 
+    filter(Primary.Type == "ASSAULT") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct() %>% .[fishnet,]
+
+crim_ppp <- as.ppp(st_coordinates(crimes), W = st_bbox(final_net))
+
+crim_KDE_sf <- as.data.frame(crim_KD.1000) %>%
   st_as_sf(coords = c("x", "y"), crs = st_crs(final_net)) %>%
   aggregate(., final_net, mean) %>%
   mutate(label = "Kernel Density",
@@ -597,18 +693,14 @@ burg_KDE_sf <- as.data.frame(burg_KD.1000) %>%
            Risk_Category >= 70 & Risk_Category <= 89 ~ "70% to 89%",
            Risk_Category >= 50 & Risk_Category <= 69 ~ "50% to 69%",
            Risk_Category >= 30 & Risk_Category <= 49 ~ "30% to 49%",
-           Risk_Category >= 1 & Risk_Category  <= 29 ~ "1% to 29%")) %>%
+           Risk_Category >= 1 & Risk_Category <= 29 ~ "1% to 29%")) %>%
   cbind(
     aggregate(
-      dplyr::select(burglaries18) %>% mutate(burgCount = 1), ., sum) %>%
+      dplyr::select(crimes20) %>% mutate(burgCount = 1), ., sum) %>%
     mutate(burgCount = replace_na(burgCount, 0))) %>%
   dplyr::select(label, Risk_Category, burgCount)
-```
 
-Note that this is different from the book, where we pull a model out of a list of models we've created. For your homework, you'll be creating multiple models.
-
-```{r}
-burg_risk_sf <-
+crim_risk_sf <-
   reg.ss.spatialCV %>%
   mutate(label = "Risk Predictions",
          Risk_Category = ntile(Prediction, 100),
@@ -620,29 +712,26 @@ burg_risk_sf <-
          Risk_Category >= 1 & Risk_Category <= 29 ~ "1% to 29%")) %>%
   cbind(
     aggregate(
-      dplyr::select(burglaries18) %>% mutate(burgCount = 1), ., sum) %>%
+      dplyr::select(crimes20) %>% mutate(burgCount = 1), ., sum) %>%
       mutate(burgCount = replace_na(burgCount, 0))) %>%
   dplyr::select(label,Risk_Category, burgCount)
-```
 
-We don't do quite as well because we don't have very many features, but still pretty good.
-
-```{r}
-rbind(burg_KDE_sf, burg_risk_sf) %>%
-  na.omit() %>%
+rbind(crim_KDE_sf, crim_risk_sf) %>%
+  na.omit() %>% 
   gather(Variable, Value, -label, -Risk_Category, -geometry) %>%
   ggplot() +
     geom_sf(aes(fill = Risk_Category), colour = NA) +
-    geom_sf(data = sample_n(burglaries18, 3000), size = .5, colour = "black") +
+    geom_sf(data = sample_n(crimes20, 3000), size = .5, colour = "black") +
     facet_wrap(~label, ) +
     scale_fill_viridis(discrete = TRUE) +
     labs(title="Comparison of Kernel Density and Risk Predictions",
-         subtitle="2017 burglar risk predictions; 2018 burglaries") +
+         subtitle="2019 Assault Risk Predictions; 2020 Assaults",
+         caption="Figure 4.2") +
     mapTheme(title_size = 14)
 ```
 
-```{r}
-rbind(burg_KDE_sf, burg_risk_sf) %>%
+```{r, message = FALSE}
+rbind(crim_KDE_sf, crim_risk_sf) %>%
   st_set_geometry(NULL) %>% na.omit() %>%
   gather(Variable, Value, -label, -Risk_Category) %>%
   group_by(label, Risk_Category) %>%
@@ -656,3 +745,8 @@ rbind(burg_KDE_sf, burg_risk_sf) %>%
       labs(title = "Risk prediction vs. Kernel density, 2018 burglaries") +
       theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
 ```
+## 5.1 Conclusions
+
+Since the spatial LOGO-CV model does generalize fairly well in its risk predictions across actual kernel density, relative to the crime data, this model may have some use in predicting assault locations. However, though it predicts well for "high risk" categories, the presence of selection bias cannot be completely ruled out. As mentioned before, police discretion over whether to arrest people for assault is far more inconsistent than for crimes such as burglary. Any selection bias could lead this model to be less accurate, or to predict in areas that police already *expect* assaults to be, and thus patrol more attentively in.
+
+The model also has consistent errors that are diverted depending on whether a neighborhood is majority-white or non-white. This may be problematic, as if error that correlates with race is present, use of this model may lead to under- or over-policing of certain neighborhoods. Since over-policing in non-white neighborhoods and racial bias in arrests are major community concerns, I would suggest that more work be done to minimize the disparity in error by race, as well as considering other possible bias factors like income, before putting this model into practice.
