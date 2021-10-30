@@ -463,7 +463,7 @@ final_net <- final_net %>%
 ## What does k = 1 represent?
 ```
 
-```{r, message = FALSE}
+```{r, fig.width=8, fig.height=10, message = FALSE}
 
 correlation.long <-
   st_drop_geometry(final_net) %>%
@@ -745,6 +745,7 @@ rbind(crim_KDE_sf, crim_risk_sf) %>%
       labs(title = "Risk prediction vs. Kernel density, 2018 burglaries") +
       theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
 ```
+
 ## 5.1 Conclusions
 
 Since the spatial LOGO-CV model does generalize fairly well in its risk predictions across actual kernel density, relative to the crime data, this model may have some use in predicting assault locations. However, though it predicts well for "high risk" categories, the presence of selection bias cannot be completely ruled out. As mentioned before, police discretion over whether to arrest people for assault is far more inconsistent than for crimes such as burglary. Any selection bias could lead this model to be less accurate, or to predict in areas that police already *expect* assaults to be, and thus patrol more attentively in.
