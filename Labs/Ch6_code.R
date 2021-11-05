@@ -82,19 +82,20 @@ churnreg1 <- glm(churnNumeric ~ .,
 
 summary(churnreg1)
 
-# Logistic regression coefficients are on the scale of ‘log-odds’
+# Logistic regression coefficients are on the scale of log-odds
+# avgBounceDistance is recoded in churnreg2 such that any value that does not equal 1-4 ft. receives Other
 churn <- 
   mutate(churn, avgBounceDistance = ifelse(avgBounceDistance == "1-4 ft.", "1-4 ft.", 
                                            "Other"))
 
-set.seed(3456)
+set.seed(3456) 
 trainIndex <- createDataPartition(churn$Churn, p = .50,
                                   list = FALSE,
                                   times = 1)
 churnTrain <- churn[ trainIndex,]
 churnTest  <- churn[-trainIndex,]
 
-# avgBounceDistance is recoded in churnreg2 such that any value that does not equal 1-4 ft. receives Other
+
 churnreg2 <- glm(churnNumeric ~ .,
                  data=churnTrain %>% dplyr::select(-SeniorCitizen, 
                                                    -WeekendBouncer,
@@ -103,7 +104,7 @@ churnreg2 <- glm(churnNumeric ~ .,
 
 summary(churnreg2)
 
-# 'Pseudo R Squared’ Goodness-of-fit (weakest, but good for quickly comparing different model specifications)
+# Pseudo R Squared Goodness-of-fit (weakest, but good for quickly comparing different model specifications)
 pR2(churnreg2)[4]
 
 # Goodness-of-fit predict for churnTest then tally up the rate that Churn and No_Churn are predicted correctly
@@ -113,7 +114,7 @@ testProbs <- data.frame(Outcome = as.factor(churnTest$churnNumeric),
 head(testProbs)
 
 # Plot the distribution of predicted probabilities (x-axis) for Churn and No_Churn.
-# If churnreg2 was very predictive, the ‘hump’ of predicted probabilities for Churn 
+# If churnreg2 was very predictive, the hump of predicted probabilities for Churn 
 # would cluster around 1 on the x-axis, while the predicted probabilities for No_Churn would cluster around 0.
 ggplot(testProbs, aes(x = Probs, fill = as.factor(Outcome))) + 
   geom_density() +
@@ -148,7 +149,7 @@ ggplot(testProbs, aes(d = as.numeric(testProbs$Outcome), m = Probs)) +
 # Area under the curve (AUC) measure: reasonable AUC is between 0.5 and 1
 pROC::auc(testProbs$Outcome, testProbs$Probs)
 
-# trainControl parameter is set to run 100 k-folds and to output predicted probabilities, classProbs, for ‘two classes’, Churn and No_Churn
+# trainControl parameter is set to run 100 k-folds and to output predicted probabilities, classProbs, for two classes, Churn and No_Churn
 ctrl <- trainControl(method = "cv", number = 100, classProbs=TRUE, summaryFunction=twoClassSummary)
 
 # metrics in the cvFit output are for mean AUC, Sensitivity, and Specificity across all 100 folds.

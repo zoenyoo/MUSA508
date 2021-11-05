@@ -48,7 +48,7 @@ palette4 <- c("#981FAC","#FF006A","#FE4C35","#FE9900")
 palette2 <- c("#981FAC","#FF006A")
 
 
-advertising <- read.csv("~/GitHub/MUSA_508_Lab/Week_7/advertising_clean.csv")
+advertising <- read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Labs/Week_7/advertising_clean.csv")
 
 ```
 
