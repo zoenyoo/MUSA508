@@ -1,30 +1,58 @@
 ---
-title: "Chapte 8 HW"
+title: "Homework 5: Predicting Bikeshare Trips"
 author: 'Zoe Yoo'
-date: "11/12/2021"
-output: html_document
+date: "11/19/2021"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+library(tidyverse)
+library(sf)
+library(lubridate)
+library(tigris)
+library(tidycensus)
+library(viridis)
+library(riem)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+
+palette5 <- c("#981FAC","#CB0F8B","#FF006A","#FE4C35","#FE9900")
+palette4 <- c("#981FAC","#FF006A","#FE4C35","#FE9900")
+palette2 <- c("#981FAC","#FF006A")
+root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
 ```
 
-## R Markdown
+introduce the reader to bike share and the need for re-balancing. How will re-balancing occur? Perhaps you will manage a small fleet of trucks to move bikes from here to there or perhaps you will offer rewards, discounts or other incentives for riders to move a bike from place to place. Keep in mind, your plan will inform the appropriate time lag features you can use. How far forward do you wish to predict for at any given time?
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+## The necessities of bike share
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+Bike share programs are being implemented by many municipal transit systems as a quick, familiar option for people to navigate cities with. They are quickly becoming an essential facet of transit among buses and trains, especially as they are somewhat easy to install, generally popular and widely used, and generate revenue; in addition, bikeshare use encourages the further development of bicycle infrastructure. Bikeshare systems do pose logistic issues that were not present in previous transit forms: namely, the problem of stations becoming un-balanced. Often, people take more bikes/rides in one direction, such as towards downtown areas, than the opposite, which leads to empty stations in some areas and overloaded stations with no space in others. Unbalanced directional use is also an issue with buses and trains, but there poses challenges related to scheduling and revenue-- other than extreme cases, unbalanced trains/buses do not limit peoples' ability to use them. With bikeshare, unbalanced use prevents people from being able to utilize the system, and so is a much larger issue that needs to be addressed.
 
-```{r cars}
-summary(cars)
+There are several approaches to combating station un-balancing; for example, the Indego system in Philadelphia offers riders credit-building towards free rides in exchange for taking bikes to empty stations, and many cities use trucks to move bicycles between stations. However, though these interventions exist, many are reactive strategies that only take place *after* supply is already depleted; ideally, cities would be able to anticipate bikeshare supply strains before they happen and take appropriate steps to combat them, preventing people from walking up to empty stations or cycling to a fully stocked station. Here, I will be working on developing a predictive model, incorporating time lag (predicting based on ridership of previous time periods) to approximate which stations trend to be overloaded or undersupplied. 
+
+My initial model will be for the San Francisco Bay Area Bay Wheels system, run in conjunction with Lyft and the Metropolitan Transportation Commission. I will not be studying ... as only a very minute number of people cross the bay on city bikes; for March and April of 2021, only 3 out of about 278,000 total Bay Wheels trips were recorded to cross the bay. Another interesting factor in the Bay Wheels system is that riders are actually able to park their eBikes at public bike racks instead of stations. This poses many more interesting questions about the placement of bikes throughout the Bay Area, including the possibility that overuse by eBikes blocks personal bike owners from bike racks. Though there is data available on bike rack locations in San Francisco (and would very interesting for future study), for this model I will be limiting the scope to bicycles that were locked at stations.
+
+
+## Feature Engineering
+
+I drew initial data from the [Bay Wheels System Data](https://www.lyft.com/bikes/bay-wheels/system-data) site.
+
+```{r}
+
+
+
 ```
 
-## Including Plots
+```{r}
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
