@@ -17,7 +17,6 @@ palette2 <- c("#981FAC","#FF006A")
 root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 
-census_api_key("0e2fd0485a8e62ac3a5ebf1ad8bebb2cb181de6b", overwrite = TRUE)
 
 ride <- read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Ch8_HW/202103-04tripdata_sf.csv")
 
@@ -26,7 +25,7 @@ ride2 <-
   mutate(interval60 = floor_date(mdy_hm(started_at), unit = "hour"),
          interval15 = floor_date(mdy_hm(ended_at), unit = "15 mins"),
          week = week(interval60),
-         dotw = wday(interval60, label=TRUE)) %>% 
+         dotw = wday(interval60, label=TRUE)) 
 
 weather.Data <- 
   riem_measures(station = "SFO", date_start = "2021-03-01", date_end = "2021-04-30")
@@ -204,4 +203,30 @@ ggplot()+
   labs(title="Bike Share Trips per Hour by Station",
        subtitle="March & April 2021")+
   mapTheme()
+
+length(unique(dat_census$interval60)) * length(unique(dat_census$started_at))
+
+study.panel <- 
+  expand.grid(interval60=unique(dat_census$interval60), 
+              started_at = unique(dat_census$started_at)) %>%
+  left_join(., dat_census %>%
+              select(started_at, start_station_name, Origin.Tract, start_lng, start_lat)%>%
+              distinct() %>%
+              group_by(started_at) %>%
+              slice(1))
+
+nrow(study.panel)     
+
+ride.panel <- 
+  dat_census %>%
+  mutate(Trip_Counter = 1) %>%
+  right_join(study.panel) %>% 
+  group_by(interval60, start_station_id, start_station_name, Origin.Tract, start_lng, start_lat) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>%
+  left_join(weather.Panel, by = "interval60") %>%
+  ungroup() %>%
+  filter(is.na(start_station_id) == FALSE) %>%
+  mutate(week = week(interval60),
+         dotw = wday(interval60, label = TRUE)) %>%
+  filter(is.na(Origin.Tract) == FALSE)
 

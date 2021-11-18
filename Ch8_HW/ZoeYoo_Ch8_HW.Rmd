@@ -22,6 +22,8 @@ library(riem)
 library(gridExtra)
 library(knitr)
 library(kableExtra)
+library(gifski); library(gganimate)
+
 
 palette5 <- c("#981FAC","#CB0F8B","#FF006A","#FE4C35","#FE9900")
 palette4 <- c("#981FAC","#FF006A","#FE4C35","#FE9900")
@@ -46,13 +48,253 @@ My initial model will be for the San Francisco Bay Area Bay Wheels system, run i
 
 I drew initial data from the [Bay Wheels System Data](https://www.lyft.com/bikes/bay-wheels/system-data) site.
 
+```{r feature_calculations}
+
+ride <- read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Ch8_HW/202103-04tripdata_sf.csv")
+ride <- ride %>% 
+  mutate(interval60 = floor_date(mdy_hm(started_at), unit = "hour"),
+         interval15 = floor_date(mdy_hm(started_at), unit = "15 mins"),
+         week = week(interval60),
+         dotw = wday(interval60, label=TRUE) )
+
+sfCensus <- 
+  get_acs(geography = "tract", 
+          variables = c("B01003_001", "B19013_001", 
+                        "B02001_002", "B08013_001",
+                        "B08012_001", "B08301_001", 
+                        "B08301_010", "B01002_001",
+                        "B08301_018"), 
+          year = 2019, 
+          state = "CA", 
+          geometry = TRUE, 
+          county=c("San Francisco"),
+          output = "wide") %>%
+  rename(Total_Pop =  B01003_001E,
+         Med_Inc = B19013_001E,
+         Med_Age = B01002_001E,
+         White_Pop = B02001_002E,
+         Travel_Time = B08013_001E,
+         Num_Commuters = B08012_001E,
+         Means_of_Transport = B08301_001E,
+         Total_Public_Trans = B08301_010E,
+         Total_Bike = B08301_018E) %>%
+  select(Total_Pop, Med_Inc, White_Pop, Travel_Time,
+         Means_of_Transport, Total_Public_Trans,
+         Med_Age, Total_Bike,
+         GEOID, geometry) %>%
+  mutate(Percent_White = White_Pop / Total_Pop,
+         Mean_Commute_Time = Travel_Time / Total_Public_Trans,
+         Percent_Taking_Public_Trans = Total_Public_Trans / Means_of_Transport,
+         Percent_Taking_bike = Total_Bike / Means_of_Transport)
+
+sfTracts <- 
+  sfCensus %>%
+  as.data.frame() %>%
+  distinct(GEOID, .keep_all = TRUE) %>%
+  select(GEOID, geometry) %>% 
+  st_sf()
+
+weather.Data <- 
+  riem_measures(station = "SFO", date_start = "2021-03-01", date_end = "2021-04-30")
+
+weather.Panel <-  
+  weather.Data %>%
+  mutate_if(is.character, list(~replace(as.character(.), is.na(.), "0"))) %>% 
+  replace(is.na(.), 0) %>%
+  mutate(interval60 = ymd_h(substr(valid, 1, 13))) %>%
+  mutate(week = week(interval60),
+         dotw = wday(interval60, label=TRUE)) %>%
+  group_by(interval60) %>%
+  summarize(Temperature = max(tmpf),
+            Precipitation = sum(p01i),
+            Wind_Speed = max(sknt)) %>%
+  mutate(Temperature = ifelse(Temperature == 0, 42, Temperature))
+
+dat_census <- st_join(ride %>% 
+                        filter(is.na(start_lng) == FALSE &
+                                 is.na(start_lat) == FALSE &
+                                 is.na(end_lng) == FALSE &
+                                 is.na(end_lat) == FALSE) %>%
+                        st_as_sf(., coords = c("start_lng", "start_lat"), crs = 4326),
+                      sfTracts %>%
+                        st_transform(crs=4326),
+                      join=st_intersects,
+                      left = TRUE) %>%
+  rename(Origin.Tract = GEOID) %>%
+  mutate(start_lng = unlist(map(geometry, 1)),
+         start_lat = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)%>%
+  st_as_sf(., coords = c("end_lng", "end_lat"), crs = 4326) %>%
+  st_join(., sfTracts %>%
+            st_transform(crs=4326),
+          join=st_intersects,
+          left = TRUE) %>%
+  rename(Destination.Tract = GEOID)  %>%
+  mutate(end_lng = unlist(map(geometry, 1)),
+         end_lat = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)
+
+study.panel <- 
+  expand.grid(interval60=unique(dat_census$interval60), 
+              start_station_id = unique(dat_census$start_station_id)) %>%
+  left_join(., dat_census %>%
+              select(start_station_id, start_station_name, Origin.Tract, start_lng, start_lat)%>%
+              distinct() %>%
+              group_by(start_station_id) %>%
+              slice(1))
+
+ride.panel <- 
+  dat_census %>%
+  mutate(Trip_Counter = 1) %>%
+  right_join(study.panel) %>% 
+  group_by(interval60, start_station_id, start_station_name, Origin.Tract, start_lng, start_lat) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>%
+  left_join(weather.Panel, by = "interval60") %>%
+  ungroup() %>%
+  filter(is.na(start_station_id) == FALSE) %>%
+  mutate(week = week(interval60),
+         dotw = wday(interval60, label = TRUE)) %>%
+  filter(is.na(Origin.Tract) == FALSE)
+
+ride.panel <- 
+  left_join(ride.panel, sfCensus %>%
+              as.data.frame() %>%
+              select(-geometry), by = c("Origin.Tract" = "GEOID"))
+
+ride.panel <- 
+  ride.panel %>% 
+  arrange(start_station_id, interval60) %>% 
+  mutate(lagHour = dplyr::lag(Trip_Count,1),
+         lag2Hours = dplyr::lag(Trip_Count,2),
+         lag3Hours = dplyr::lag(Trip_Count,3),
+         lag4Hours = dplyr::lag(Trip_Count,4),
+         lag12Hours = dplyr::lag(Trip_Count,12),
+         lag1day = dplyr::lag(Trip_Count,24),
+         holiday = ifelse(yday(interval60) == 148,1,0)) %>%
+   mutate(day = yday(interval60)) %>%
+   mutate(holidayLag = case_when(dplyr::lag(holiday, 1) == 1 ~ "PlusOneDay",
+                                 dplyr::lag(holiday, 2) == 1 ~ "PlustTwoDays",
+                                 dplyr::lag(holiday, 3) == 1 ~ "PlustThreeDays",
+                                 dplyr::lead(holiday, 1) == 1 ~ "MinusOneDay",
+                                 dplyr::lead(holiday, 2) == 1 ~ "MinusTwoDays",
+                                 dplyr::lead(holiday, 3) == 1 ~ "MinusThreeDays"),
+         holidayLag = replace_na(holidayLag, 0))
+
+as.data.frame(ride.panel) %>%
+    group_by(interval60) %>% 
+    summarise_at(vars(starts_with("lag"), "Trip_Count"), mean, na.rm = TRUE) %>%
+    gather(Variable, Value, -interval60, -Trip_Count) %>%
+    mutate(Variable = factor(Variable, levels=c("lagHour","lag2Hours","lag3Hours","lag4Hours",
+                                                "lag12Hours","lag1day")))%>%
+    group_by(Variable) %>%  
+    summarize(correlation = round(cor(Value, Trip_Count),2))
+
+```
+
+Below, I have plotted the number of bike share trips per hour for both March and April; though this is not apparent from the plots, the greatest ridership spikes (for example, March 6th, April 10th, both Saturdays, and April 18th, a Sunday, are much greater than weekdays. 
+
 ```{r}
 
+```
+
+## Building Models
+
+```{r model_building}
+
+ride.Train <- filter(ride.panel, week < 15)
+ride.Test <- filter(ride.panel, week >= 15)
+
+mondays <- 
+  mutate(ride.panel,
+         monday = ifelse(dotw == "Mon" & hour(interval60) == 1,
+                         interval60, 0)) %>%
+  filter(monday != 0) 
+
+easter   <- as.POSIXct("2021-04-04 01:00:00 UTC")
+
+(rbind(
+  mutate(ride.Train, Legend = "Training"), 
+  mutate(ride.Test, Legend = "Testing"))) %>%
+  group_by(Legend, interval60) %>% 
+  summarize(Trip_Count = sum(Trip_Count)) %>%
+  ungroup() %>% 
+  ggplot(aes(interval60, Trip_Count, colour = Legend)) + geom_line() +
+  scale_colour_manual(values = palette2) +
+  geom_vline(xintercept = easter, linetype = "dotted") +
+  geom_vline(data = mondays, aes(xintercept = monday)) +
+  labs(title="Bike Share Trips by Week, San Francisco, March & April 2021 ",
+       subtitle="Divided by Mondays, Dotted Line for Easter", 
+       x="Day", y="Trip Count") +
+  plotTheme() + theme(panel.grid.major = element_blank())  
+
+```
+
+```{r lag_correlation}
+
+plotData.lag <-
+  filter(as.data.frame(ride.panel), week == 9) %>%
+  dplyr::select(starts_with("lag"), Trip_Count) %>%
+  gather(Variable, Value, -Trip_Count) %>%
+  mutate(Variable = fct_relevel(Variable, "lagHour","lag2Hours","lag3Hours",
+                                "lag4Hours","lag12Hours","lag1day"))
+correlation.lag <-
+  group_by(plotData.lag, Variable) %>%
+  summarize(correlation = round(cor(Value, Trip_Count, use = "complete.obs"), 2)) 
+
+group_by(ride.panel, week, start_station_id) %>%
+  summarize(Sum_Trip_Count = sum(Trip_Count)) %>%
+  ungroup() %>% 
+  ggplot() + geom_sf(aes(fill = q5(Sum_Trip_Count))) +
+  facet_wrap(~week, ncol = 8) +
+  scale_fill_manual(values = palette5,
+                    labels = c("16", "140", "304", "530", "958"),
+                    name = "Trip_Count") +
+  labs(title="Sum of rideshare trips by tract and week") +
+  mapTheme() + theme(legend.position = "bottom") 
+```
+
+
+```{r}
+
+week9 <-
+  filter(ride, week == 9 & dotw == "Mon")
+
+week9.panel <-
+  expand.grid(
+    interval15 = unique(week9$interval15),
+    start_station_id = unique(ride$start_station_id))
+
+ride.animation.data <-
+  mutate(week9, Trip_Counter = 1) %>%
+  right_join(week9.panel) %>% 
+  group_by(interval15, start_station_id) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>% 
+  ungroup() %>% 
+  left_join(sfTracts, by=c("start_station_id" = "GEOID")) %>%
+  st_sf() %>%
+  st_transform(4326) %>% 
+  mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
+                           Trip_Count > 0 & Trip_Count <= 3 ~ "1-3 trips",
+                           Trip_Count > 3 & Trip_Count <= 6 ~ "4-6 trips",
+                           Trip_Count > 6 & Trip_Count <= 10 ~ "7-10 trips",
+                           Trip_Count > 10 ~ "11+ trips")) %>%
+  mutate(Trips  = fct_relevel(Trips, "0 trips","1-3 trips","4-6 trips",
+                              "7-10 trips","10+ trips"))
+
+rideshare_animation <-
+  ggplot() +
+  geom_sf(data = ride.animation.data, aes(fill = Trips)) +
+  scale_fill_manual(values = palette5) +
+  labs(title = "Rideshare pickups for one day in November 2018",
+       subtitle = "15 minute intervals: {current_frame}") +
+  transition_manual(interval15) +
+  mapTheme()
+
+animate(rideshare_animation, duration=20, renderer = gifski_renderer())
 
 
 ```
 
-```{r}
-
-```
 
