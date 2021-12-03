@@ -1,0 +1,193 @@
+---
+title: "MUSA 508 Notes"
+author: "Zoe Yoo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### 9/17 Lecture - On the Importance of Indicators & Transit-Oriented Development
+
+-   \~Themes from the first class\~
+
+    -   Algorithmic decision-making is just a new take on the traditional approach governments use to design programs
+    -   Evidence-based, proactive decision-making is preferable over reactive decision-making
+    -   Critical thinking, transparency, and communication are key elements to the analytical process
+    -   The importance of spatial thinking, i.e. the **spatial process**
+
+-   Good indicators are **relatable** - motivated by a pressing policy concern
+
+    -   **simple** - means, sums, and counts. Help the audience understand the significance
+    -   **relative** - draws contrasts, either between time, place, etc. "cross-sectional"
+    -   generates **more questions** than answers, and fits into a \~ narrative \~ that motivates a more robust research agenda
+
+-   TOD: Transit needs *scale*.
+
+    -   Question: Are renters willing to pay a rent premium to live close to transit?
+
+    -   There are many biases that affect the accuracy, such as where breaks are places, irrelevance of geographies (i.e. census tracts), spread of values (homogeneous, or stretched out? consider standard deviation), scale bias (spread of points within each geography or arbitrary shape determination - Modifiable Areal Unit Problem)
+
+        -   Biases turn into **assumptions**
+
+#### 9/24 Lecture - Comprehensive Planning & Data Science
+
+-   read Chapters 3 and 4 this week, running the code while doing it
+
+-   What is comprehensive planning?
+
+    -   Sometimes required by law, goal- and data-driven plans to assess current conditions of a large geography, use public input to comprehensively (across domains) develop scenarios/alternatives over forecasts of 10-20 years, and monitor their implementation
+
+-   How comprehensive planners fail with **forecasting**: no reason to expect that 'current conditions' will **generalize** to the future
+
+    -   e.g. transportation forecasting in 2001- missing ridesharing, smart tech, high speed rail, self-driving cars, pandemic effects, work from home, widespread EV use
+    -   e.g. housing- subprime collapse, airBnB, pandemic, telework, urban revitalization
+    -   Cincinnati 1925 plan overestimated population, when in reality plummeted after 1950- based on *current* conditions of the time (economic growth, migration)
+
+-   What 'systems' would we need to understand in order to (reasonably) forecast future population?
+
+    -   NY Times series on climate migration: fires in CA, coastal displacement in NC, hurricanes in FL, crop yield decline in TX... where are displaced people going to go?
+    -   Look at financial risk models? Whether people are willing to invest in certain geographies indicates (perceptionof) risk
+
+-   Case 1: Predicting bike share (Indego) demand in Philadelphia
+
+    -   Goal: create an efficient and cost-effective transit alternative while enhancing transit equity
+
+    -   Strategy: optimize station & bike locations for goals
+
+    -   are ridership patterns sufficiently general enough that they can be used to predict bike share demand without existing systems? --\> reference existing systems in other cities
+
+    -   **Weighted raster 'composite' approach:** experts with domain experience 'set the weights' of different factors like range, proximity to homes/businesses/transit, distribution of poverty, etc.
+
+    -   **Machine learning approach:** gather ridership from a sample of similar cities, as well as other exogenous data --\> the data and experience from sample cities 'sets the weights'
+
+        -   determine if other cities' data **generalizes** to Philadelphia
+
+-   Strategic planning is driven more by internal stakeholders, with a shorter time period (and can be with no public input), but is also goal-oriented
+
+-   Book study: Lancaster County, PA has been seeing increasing sprawl (number of people/acre has been decreasing over time)
+
+    -   Large expansion of development outside the UGA (urban growth area) of Lancaster
+    -   Rents are highest in Lancaster, but people are willing to live further for lower rents
+    -   Density represented by a **bid-rent curve**
+
+#### 10/1 Lecture - Predicting Home Prices in Boston: Intro to Geospatial Machine Learning
+
+-   Our goal is to **parameterize** the real estate system
+
+-   The Hedonic Model -- a framework for deconstructing a good into the value of its **constituent parts**
+
+    -   Home Price = internal characteristics, public services & (dis)amenities, spatial process (sale price of similar homes), error
+
+    -   **Accuracy**: predicted home prices-observed house prices = 0, and **generalizability**:
+
+        1.  Model is useful for predicting 'new' data
+        2.  Model can predict with comparable accuracies in different group contexts (neighborhood, race, etc.)
+
+-   Machine learning proccess
+
+    1.  **Data wrangling**- gather and compile, from disparate sources, into one consistent data set (most of the work)
+
+        -   the 'dependent variable' (outcome of interest) here is single-family home price
+        -   hypothesis: variations in price can be predicted as a function of **exposure** to certain phenomena
+
+    2.  **Exploratory analysis**- developing indicators that understand trends and communicate to non-technical decision-makers
+
+        -   correlation, multicollinearity (building a correlation matrix)
+
+    3.  **Feature engineering**- converting raw variables into useful predictive **features**
+
+        -   we will be using **ordinary least squares** (linear regression) --\> ask about *SalePrice* formula in office hours
+        -   R^2^ explains the % of variance that are explained by your model
+
+    4.  **Feature selection**- which features should go into the model?
+
+    5.  **Model estimation and validation**- is the model accurate and generalizable?
+
+#### 10/8 Lecture - Predicting Home Prices in Boston (cont.)
+
+-   Review the hedonic model:
+
+    -   Home price = Internal characteristics + Amenities + Spatial structure + Error
+    -   Remember the importance of accuracy and generalizability→ accuracy alone is not useful for predicting new values, need generalizability to predict with comparable accuracies in different group contexts
+    -   Generalizability varies by spatial, temporal scale
+
+-   Review goodness of fit on the test set→ MAE (mean absolute error) and MAPE (mean absolute percent error)
+
+    -   R^2^ is not the best for predictive purposes, as it tends to increase with number of features (adjusted R^2^ penalizes for the extra variables)
+
+-   k-Fold Cross Validation
+
+    1.  Partition data into *k* equal-sized subsets ("folds")
+    2.  For a given fold, train on a 'fold' of observations, predict on a test set, & measure goodness of fit
+    3.  Average goodness of fit across all *k* folds
+
+-   Generalizability across space- why do regression errors exhibit a systematic spatial process (i.e. clustering)?
+
+    -   Spatial error, e.g. a bunch of houses have a pool, that wasn't accounted for
+    -   Spatial lag- homes are 'appraised' by looking at comparable homes nearby ('price signal')
+
+-   Spatial Correlation- Moran's I
+
+    -   "null hypothesis" that a given spatial process is **randomly distributed**; analyzes how local means deviate from the global mean
+    -   -1 = perfectly dispersed, 0 = random, 1 = strongly clustered; p-value (0-1) is the *significance*
+    -   **Spatial weights** parameterize the *scale* of spatial relationships
+    -   The spread of Moran's I can be affected by your data
+    -   We want to engineer features that *reduce* the clustering of our errors
+
+-   Accounting for the Neighborhood Effect- does the **neighborhood fixed effect** improve the model? (Yes)
+
+    -   Regression of price as a function of 'Neighborhood Name'
+    -   Generalizability improved by the neighborhood model (lower clustering of MAPE)
+
+#### 10/22 Lecture - Geospatial risk prediction (The case of burglary)
+
+-   Discussing bias in algorithms & tradeoffs, and whether bias should prevent us from using these algorithms
+
+-   People in public policy currently do not understand how these algorithms are constructed, and there is very limited dialogue/engagement/transparency as to which situations these types of structures are appropriate
+
+-   Geospatial risk prediction model is a regression model with predictions interpreted as **'the forecasted risk/opportunity of that event occuring here'**
+
+    -   The hypothesis is that risk/opportunity is a function of ***exposure*** to geospatial **risk and protectice factors.**
+    -   Borrowing experience from observed events to structure relationships -- test to see if these relationships generalize
+    -   As exposure to risk factors increases, so does risk.
+
+-   Predictions from geospatial risk models can be thought of as ***latent risk***-- even if a crime has not been observed, it still has the combination of risk factors
+
+    -   Latent risk is the probability of an event being observed based on existing relationships
+    -   Generalizability is more important than accuracy here
+    -   Also bias or over/underreporting of certain crimes, e.g. police selection bias of pursuing drug offenses
+
+-   **'Broken windows'** theory, which connects community 'disorder' and crime; theory is that features of the built environment may signal tolerance for crime
+
+    -   Exposure hypothesis for co-location
+    -   Broken windows policing of low-income (disinvested) neighborhoods led to overpolicing in minority neighborhoods
+    -   A risk model built on disrepair might only perpetuate racist place-based policies → not generalizable due to input data bias
+
+-   Resource allocation process
+
+    -   We use a 'fishnet' to treat crime risk as something that varies continuously across space- dividing up the city into many tiny cells
+
+    -   Features? Risk factors as counts, avg nn distance
+
+    -   Associate spatial units with each grid cell
+
+    -   Exploring the spatial process of burglary
+
+        -   Global Moran's I (all observations) vs. local Moran's I (is there clustering in your neighborhood?)
+        -   Gives you local "hotspots"
+
+    -   Poisson Regression- used for count data
+
+    -   Leave One Group Out Cross Validation (LOGO-CV)- treating subsets as folds
+
+-   IS the model more 'useful,' or less biased than traditional hot spot mapping?
+
+#### 10/29 Lecture - People-based machine learning systems
+
+-   **Binary** regression = Binomial logistic regression
+
+#### 11/5 Lecture - Data Privacy & Algorithmic Fairness
+
+- 
