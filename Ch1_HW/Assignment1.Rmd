@@ -1,0 +1,440 @@
+---
+title: "MUSA 508, Assignment 1"
+author: "Zoe Yoo"
+date: "9/24/2021"
+output: html_document
+---
+
+### Location
+
+I have decided to study San Francisco for the Transit Indicators assignment. I find it interesting because I used to live just across the bay from San Francisco, and since rents have shot up in the past years, thought it would be relevant to study how that related to transit.
+
+```{r setup, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/zoeny/OneDrive - PennO365/GrSchool/Year1/MUSA 508 Public Policy Analytics/Assignment1")
+
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(kableExtra)
+library(ggplot2)
+library(dplyr)
+
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+options(scipen=999) # telling R to use scientific notation 
+options(tigris_class = "sf") # tells tidycensus to download Census geometries in the sf or Simple Feature format
+
+mapTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 16,colour = "black"),
+    plot.subtitle=element_text(face="italic"),
+    plot.caption=element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black", fill=NA, size=2),
+    strip.text.x = element_text(size = 14))
+}
+
+plotTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 16,colour = "black"),
+    plot.subtitle = element_text(face="italic"),
+    plot.caption = element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.major = element_line("grey80", size = 0.1),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black", fill=NA, size=2),
+    strip.background = element_rect(fill = "grey80", color = "white"),
+    strip.text = element_text(size=12),
+    axis.title = element_text(size=12),
+    axis.text = element_text(size=10),
+    plot.background = element_blank(),
+    legend.background = element_blank(),
+    legend.title = element_text(colour = "black", face = "italic"),
+    legend.text = element_text(colour = "black", face = "italic"),
+    strip.text.x = element_text(size = 14)
+  )
+}
+# Load Quantile break functions
+
+qBr <- function(df, variable, rnd) {
+  if (missing(rnd)) {
+    as.character(quantile(round(df[[variable]],0),
+                          c(.01,.2,.4,.6,.8), na.rm=T))
+  } else if (rnd == FALSE | rnd == F) {
+    as.character(formatC(quantile(df[[variable]]), digits = 3),
+                 c(.01,.2,.4,.6,.8), na.rm=T)
+  }
+}
+palette5 <- c("#f0f9e8","#bae4bc","#7bccc4","#43a2ca","#0868ac")
+
+q5 <- function(variable) {as.factor(ntile(variable, 5))}
+
+```
+
+
+
+### Census Calls
+
+First, I have called census data by tract using the census API for several variables, including total population, number of people who take public transit to work, median household income, median rent, total number of people in poverty, and number of people who have lived in the same house for at least one year. Total population and number of people in poverty are important for, obviously, calculating the percent of low-income people, but median income and median rent are useful for economic analysis, while transit use can be used for both current transit analysis and as an indicator of where more transit may be needed. Lastly, I thought the number of people who have (not) moved in the past year could be a way to look at displacement, but realize that metric cannot say much about such a broad topic on its own, especially due to the limit of just one year.
+
+```{r census_calls, warning=FALSE}
+
+tracts10 <-  
+  get_acs(geography = "tract", variables = c("B25026_001E","B08124_022","B15001_050E",
+                                             "B15001_009E","B19013_001E","B25058_001E",
+                                             "B06012_002E", "B01002_001E", "B07010_012E"), 
+                year=2010, state=06, county=075, geometry=T, output = "wide") %>%
+  st_transform('EPSG:2227') %>%
+  rename(TotalPop = B25026_001E, 
+         PublicTransit = B08124_022E,
+         MedHHInc = B19013_001E, 
+         MedRent = B25058_001E,
+         TotalPoverty = B06012_002E,
+         MedAge = B01002_001E,
+         SameHouse = B07010_012E) %>%
+  dplyr::select(-NAME, -starts_with("B")) %>%
+  mutate(pctPoverty = ifelse(TotalPop > 0, (TotalPoverty / TotalPop)*100, 0),
+         pctSameHouse = ifelse(TotalPop > 0, (SameHouse / TotalPop)*100, 0),
+         pctTransit = ifelse(TotalPop > 0, (PublicTransit / TotalPop)*100, 0),
+         year = "2010") %>%
+  dplyr::select(-TotalPoverty, -SameHouse, -PublicTransit) 
+
+tracts10 <- tracts10[-c(47, 97, 197), ] # removing two tracts that have no population (the Farallon islands and another section of water), and Treasure Island
+
+tracts19 <-  
+  get_acs(geography = "tract", variables = c("B25026_001E","B08124_022","B15001_050E",
+                                             "B15001_009E","B19013_001E","B25058_001E",
+                                             "B06012_002E", "B01002_001E", "B07010_012E"), 
+                year=2019, state=06, county=075, geometry=T, output = "wide") %>%
+  st_transform('EPSG:2227') %>%
+  rename(TotalPop = B25026_001E, 
+         PublicTransit = B08124_022E, # estimate of people who take public transit to work
+         MedHHInc = B19013_001E, 
+         MedRent = B25058_001E,
+         TotalPoverty = B06012_002E,
+         MedAge = B01002_001E,
+         SameHouse = B07010_012E) %>%
+  dplyr::select(-NAME, -starts_with("B")) %>%
+  mutate(pctPoverty = ifelse(TotalPop > 0, (TotalPoverty / TotalPop)*100, 0),
+         pctSameHouse = ifelse(TotalPop > 0, (SameHouse / TotalPop)*100, 0),
+         pctTransit = ifelse(TotalPop > 0, (PublicTransit / TotalPop)*100, 0),
+         year = "2019") %>%
+  dplyr::select(-TotalPoverty, -SameHouse, -PublicTransit) 
+
+tracts19 <- tracts19[-c(60, 96, 197), ] # removing two tracts that have no population (the Farallon islands and another section of water), and Treasure Island
+
+```
+
+Below, I have just mapped out the BART stops to give a basic idea of where major transit lies in San Francisco. San Francisco does have a robust bus system, in addition to streetcars, through the SFMTA, but the number of SFMTA stops is large enough to make visual analysis difficult, so instead stuck to a simpler view of the city's limited subway.
+
+```{r stops, warning=FALSE}
+
+dd19_5 <- load_variables(year = 2019,dataset = "acs5")
+
+SFtransitStops <- 
+  rbind(
+    # https://data.sfgov.org/Transportation/Muni-Stops/i28k-bkz6 too many stops to incorporate here, and I wasn't able to find data on just rail/streetcar stops
+    #st_read("C:/Users/zoeny/OneDrive - PennO365/GrSchool/Year1/MUSA 508 Public Policy Analytics/Assignment1/Muni Stops.geojson") %>% 
+      # mutate(System = "SF_Muni") %>%
+      # select(System),
+    # https://www.bart.gov/schedules/developers/geo
+    st_read("http://raw.githubusercontent.com/zoenyoo/MUSA508/main/BART_System_2020.geojson") %>% 
+      mutate(System ="BART") %>%
+      select(System)) %>%
+  st_transform(st_crs(tracts10))  
+
+stops_SF <- SFtransitStops[tracts10, ]
+
+ggplot() + 
+  geom_sf(data=st_union(tracts19)) +
+  geom_sf(data=stops_SF, 
+          aes(colour = System), 
+          show.legend = "point", size= 2) +
+  scale_colour_manual(values = c("orange","blue")) +
+  labs(title="BART Stops", 
+       subtitle="San Francisco, CA", 
+       ) +
+  mapTheme()
+
+stop_Buffer <-
+  st_union(st_buffer(stops_SF, 2640)) %>%
+      st_sf() %>%
+      mutate(Legend = "Unioned Buffer")
+
+clip <- 
+  st_intersection(stop_Buffer, tracts10) %>%
+  dplyr::select(TotalPop) %>%
+  mutate(Selection_Type = "Clip")
+
+selectCentroids <-
+  st_centroid(tracts10)[stop_Buffer,] %>%
+    st_drop_geometry() %>%
+    left_join(dplyr::select(tracts10, GEOID)) %>%
+    st_sf() %>%
+    dplyr::select(TotalPop) %>%
+    mutate(Selection_Type = "Select by Centroids")
+
+
+
+```
+
+### Basic Information 
+
+Next, I have made a basic table, as well as bar graphs, of all of the metrics, comparing by both year and proximity to Transit-Oriented Development (TOD). For the purposes of this assignment, TOD was determined by a buffer around BART stations of 0.5 miles, not considering street topography or whether development classified as TOD actually exists inside the buffers. It is mainly to separate walkability versus non-walkability of stations.
+
+```{r table, warning=FALSE}
+
+allTracts <- rbind(tracts10,tracts19)
+allTracts.group <- 
+  rbind(
+    st_centroid(allTracts)[stop_Buffer,] %>%
+      st_drop_geometry() %>%
+      left_join(allTracts) %>%
+      st_sf() %>%
+      mutate(TOD = "TOD"),
+    st_centroid(allTracts)[stop_Buffer, op = st_disjoint] %>%
+      st_drop_geometry() %>%
+      left_join(allTracts) %>%
+      st_sf() %>%
+      mutate(TOD = "Non-TOD")) %>%
+  mutate(MedRent.inf = ifelse(year == "2010", MedRent * 1.17, MedRent))
+
+allTracts.Summary <- 
+  st_drop_geometry(allTracts.group) %>%
+    group_by(year, TOD) %>%
+    summarize(Rent = mean(MedRent, na.rm = T),
+              Population = mean(TotalPop, na.rm = T),
+              Percent_Poverty = mean(pctPoverty, na.rm = T),
+              Med_Age = mean(MedAge, na.rm = T),
+              Percent_Transit = mean(pctTransit, na.rm = T),
+              Percent_SameHouse = mean(pctSameHouse, na.rm = T))
+
+kable(allTracts.Summary, digits = 2) %>%
+  kable_styling() 
+
+```
+
+
+
+```{r bars, warning=FALSE}
+
+allTracts.Summary %>%
+  gather(Variable, Value, -year, -TOD) %>%
+  ggplot(aes(year, Value, fill = TOD)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    facet_wrap(~Variable, scales = "free", ncol=3) +
+    scale_fill_manual(values = c("#bae4bc", "#0868ac")) +
+    labs(title = "Indicator differences across time and space") +
+    plotTheme() + theme(legend.position="bottom")
+
+```
+
+### Indicator Maps
+
+Now, I have spatially mapped each selected indicator, with TOD buffer areas outlined in red.
+
+```{r maps, warning=FALSE}
+
+ggplot(allTracts.group)+
+    geom_sf(data=st_union(tracts19)) +
+    geom_sf(aes(fill = q5(MedRent.inf))) +
+    geom_sf(data = stop_Buffer, fill = "transparent", color = "red")+
+    scale_fill_manual(values = palette5,
+                      labels = qBr(allTracts.group, "MedRent.inf"),
+                      name = "Rent\n(Quintile Breaks)") +
+    labs(title = "Median Rent 2010-2019", subtitle = "Real Dollars   San Francisco, CA") +
+    facet_wrap(~year)+
+    mapTheme() + 
+    theme(plot.title = element_text(size=18))
+
+ggplot(allTracts.group)+
+    geom_sf(data=st_union(tracts19)) +
+    geom_sf(aes(fill = q5(MedAge))) +
+    geom_sf(data = stop_Buffer, fill = "transparent", color = "red")+
+    scale_fill_manual(values = palette5,
+                      labels = qBr(allTracts.group, "MedAge"),
+                      name = "Median Age\n(Quintile Breaks)") +
+    labs(title = "Median Age 2010-2019", subtitle = "San Francisco, CA") +
+    facet_wrap(~year)+
+    mapTheme() + 
+    theme(plot.title = element_text(size=18))
+
+ggplot(allTracts.group)+
+    geom_sf(data=st_union(tracts19)) +
+    geom_sf(aes(fill = q5(pctSameHouse))) +
+    geom_sf(data = stop_Buffer, fill = "transparent", color = "red")+
+    scale_fill_manual(values = palette5,
+                      labels = qBr(allTracts.group, "pctSameHouse"),
+                      name = "% at the same\naddress last year\n(Quintile Breaks)") +
+    labs(title = "Percent of People Who Have Lived at \nTheir Address for at Least One Year", subtitle = "San Francisco, CA") +
+    facet_wrap(~year)+
+    mapTheme() + 
+    theme(plot.title = element_text(size=18))
+
+ggplot(allTracts.group)+
+    geom_sf(data=st_union(tracts19)) +
+    geom_sf(aes(fill = q5(pctTransit))) +
+    geom_sf(data = stop_Buffer, fill = "transparent", color = "red")+
+    scale_fill_manual(values = palette5,
+                      labels = qBr(allTracts.group, "pctTransit"),
+                      name = "% who take\ntransit to work \n(Quintile Breaks)") +
+    labs(title = "Percent of People Who Take \nPublic Transit to Work", subtitle = "San Francisco, CA") +
+    facet_wrap(~year)+
+    mapTheme() + 
+    theme(plot.title = element_text(size=18))
+
+```
+
+### Relationships between Rent and Distance
+
+The below map illustrates distances from BART station through half-mile buffers, where every blue line is a half-mile further than the last. Adding the number of lines equals the total distance from the nearest BART station. Stations are in red.
+Additionally, the graph below illustrates the relation of distance from the subway to median rent. There is no clear relation between the two, looking at the graph.
+
+```{r rings, warning=FALSE}
+
+stopBuffers <- rbind(
+  st_buffer(stops_SF,2640) %>% 
+    mutate(Legend = "Buffer") %>% 
+    dplyr::select(Legend),
+  st_union(st_buffer(stops_SF,2640)) %>% 
+    st_sf() %>% 
+    mutate(Legend = "Unionized Buffer"),
+  st_union(st_buffer(stops_SF,1)) %>% 
+    st_sf() %>% 
+    mutate(Legend = "1-foot Buffer")
+)
+
+buffer <- filter(stopBuffers, Legend=="Unionized Buffer")
+onefoot <- filter(stopBuffers, Legend=="1-foot Buffer")
+
+allTracts.rings <-
+  st_join(st_centroid(dplyr::select(allTracts.group, GEOID, year)), 
+          multipleRingBuffer(onefoot, 26400, 2640)) %>%
+  st_drop_geometry() %>%
+  left_join(dplyr::select(allTracts.group, GEOID, MedRent, year), 
+            by=c("GEOID"="GEOID", "year"="year")) %>%
+  st_sf() %>%
+  mutate(distancef = distance * 1)  %>%
+  mutate(distance = distance / 5280)
+
+allTracts.buffrings <-
+  multipleRingBuffer(onefoot, 26400, 2640) %>% 
+  mutate(distance = distance / 5280) #convert to miles
+
+
+ggplot()+
+  geom_sf(data=st_union(tracts10)) +
+  geom_sf(data = allTracts.buffrings, fill = "transparent", color = "blue") +
+  geom_sf(data=stops_SF, 
+          aes(colour = System), 
+          show.legend = "point", size= 2) +
+  labs(title = "Distances from BART Stations (1/2 mi Ring Buffers)", subtitle = "San Francisco, CA") +
+  mapTheme()
+
+AvgRent <-
+  allTracts.rings %>%
+  group_by(year, distance) %>%
+  summarise(Rent = mean(MedRent, na.rm = T))
+
+ggplot(data=AvgRent,
+       aes(x = distance, y = Rent, color = year)) +
+  geom_point() +
+  geom_line(size = 1.5) +
+  scale_x_continuous(breaks=seq(0, 5, by = 0.5)) +
+  scale_color_manual(values = c("blue", "dark green" ))+
+  scale_y_continuous(labels = scales::dollar_format()) +
+  xlab(label = "Distance from Subway (miles)") +
+  ylab(label = "Avg. Median Rent (by Tract)") +
+  labs(title = "Average Rent by Distance from Station",
+       subtitle = "1/2 Mile Ring Buffers",
+       caption ="x") +
+  plotTheme()
+
+```
+
+I was hoping to show through these graduated maps a way to see rent and population around BART stations at a glance. The size of points increases with population, and the blue fill color brightens with higher median rent. Since 2010, the areas around upper Market Street stations have increased the most in both population and median rent, but overall rent has consistently risen throughout the city.
+
+``` {r graduated, warning=FALSE}
+
+library(RColorBrewer)
+
+allTracts_buff <- st_centroid(allTracts)[stopBuffers,]
+
+graduated_map <- ggplot()+
+  #POLYGON BASE
+  geom_sf(data = allTracts,
+          fill = "white", color = "grey75")+
+  geom_sf(data = stop_Buffer, fill = "grey")+
+  # POINTS
+  geom_sf(data = allTracts_buff %>%
+            st_centroid(), # to centroid
+          shape = 21, color='grey10',
+          aes(
+            size = allTracts_buff$TotalPop, # set point size by column value
+            fill = allTracts_buff$MedRent # set point fill ('color') by column value
+          )) +
+  labs(title = "Median Rent and Total Population in Transit-Oriented Areas, 2010-2019", subtitle = "San Francisco, CA, 2010") +
+  facet_wrap(~year) +
+  mapTheme()
+  
+graduated_map
+#ggplot()+
+#  geom_line(data=allTracts, aes(x=allTracts.rings$distance, y=MedRent, group=1))
+
+```
+
+### Crime Data
+
+I was able to download point data for both 2010 and 2019 from San Francisco's DataSF program, and overlaid the points over the existing rent maps for each year. As can be seen by the maps, crime doesn't seem to concentrate around BART stations in particular or correlate with rent, but does look to be more frequent in the more populated areas of San Francisco, and especially in areas frequented by tourists (upper Market St, Chinatown, Embarcadero). 
+
+``` {r crime}
+
+crimePts2010 <- 
+  read.csv("C:/Users/zoeny/OneDrive - PennO365/GrSchool/Year1/MUSA 508 Public Policy Analytics/Assignment1/Police_Department_Incident_Reports__Historical_2003_to_May_2018.csv", header = TRUE, sep = ",", quote = "\"",
+         dec = ".")
+               
+crimePts2019 <- read.csv("C:/Users/zoeny/OneDrive - PennO365/GrSchool/Year1/MUSA 508 Public Policy Analytics/Assignment1/Police_Department_Incident_Reports__2018_to_Present.csv", header = TRUE, sep = ",", quote = "\"",
+                       dec = ".")
+
+crimePts2010_sf <- st_as_sf(crimePts2010, coords = c("X", "Y"), crs = 4326) %>% 
+  mutate(Longitude=crimePts2010$X) %>% 
+  mutate(Latitude=crimePts2010$Y) %>% 
+  st_transform(st_crs(tracts10))
+
+crimePts2019_sf <- st_as_sf(crimePts2019, coords = c("Longitude", "Latitude"), crs = 4326, agr = "constant")  %>% 
+  mutate(Longitude=crimePts2019$Longitude) %>% 
+  mutate(Latitude=crimePts2019$Latitude) %>% 
+  st_transform(st_crs(tracts10))
+
+# Plot crime and rent for TOD and Non-TOD
+
+ggplot()+
+    geom_sf(data=tracts10, aes(fill = q5(tracts10$MedRent))) +
+    scale_fill_manual(values = palette5,
+                      labels = qBr(tracts10, "MedRent"),
+                      name = "Rent\n(Quintile Breaks)")+
+    geom_sf(data=crimePts2010_sf,color='lightgrey', size=0.3, alpha=0.25) +
+    geom_sf(data = stop_Buffer, fill = "transparent", color = "red") +
+    labs(title="Crime Point Data overlaid on Rent, 2010", subtitle="San Francisco (TOD areas outlined in red)") +
+    mapTheme()
+
+ggplot()+
+    geom_sf(data=tracts10, aes(fill = q5(tracts19$MedRent))) +
+    scale_fill_manual(values = palette5,
+                      labels = qBr(tracts19, "MedRent"),
+                      name = "Rent\n(Quintile Breaks)")+
+    geom_sf(data=crimePts2010_sf,color='lightgrey', size=0.3, alpha=0.25) +
+    geom_sf(data = stop_Buffer, fill = "transparent", color = "red") +
+    labs(title="Crime Point Data overlaid on Rent, 2019", subtitle="San Francisco (TOD areas outlined in red)") +
+    mapTheme()
+
+```

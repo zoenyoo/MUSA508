@@ -1,0 +1,382 @@
+---
+title: 'Homework 4: Risk Modeling'
+author: "Zoe Yoo"
+date: "11/5/2021"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+## 1. One paragraph on the motivation for the analysis.
+
+Because this tax credit is a public community investment, it is not revenue-motivated; the objective here is to ensure that both money is spent to contact the people that would qualify for the credit, but would not know to apply for it otherwise, as well as the $5,000 cost of the credit itself. 
+Although predicting incorrectly would not result in *lost* revenue, it would still be undesirable due to the failure of Emil City's Department of Housing and Community Development to properly distribute funds to the people who need them, in addition to the loss of local investment that introduces value to homes and neighborhoods. 
+
+```{r load_packages, warning = FALSE, message=FALSE}
+options(scipen=10000000)
+
+library(tidyverse)
+library(kableExtra)
+library(caret)
+library(knitr) 
+library(pscl)
+library(plotROC)
+library(pROC)
+library(lubridate)
+library(kableExtra)
+library(RColorBrewer)
+library(gridExtra)
+library(stargazer)
+```
+
+```{r loading} 
+palette5 <- c("#981FAC","#CB0F8B","#FF006A","#FE4C35","#FE9900")
+palette4 <- c("#981FAC","#FF006A","#FE4C35","#FE9900")
+palette2 <- c("#981FAC","#FF006A")
+root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+
+demog <- read.csv("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/Chapter6/housingSubsidy.csv") %>% 
+  na.omit()
+
+```
+
+## 2. Develop and interpret data visualizations that describe feature importance/correlation.
+
+```{r exploratory}
+
+demog %>%
+  dplyr::select(y,inflation_rate, age, unemploy_rate) %>%
+  gather(Variable, value, -y) %>%
+  ggplot(aes(y, value, fill=y)) + 
+  geom_bar(position = "dodge", stat = "summary", fun = "mean") + 
+  facet_wrap(~Variable, scales = "free") +
+  scale_fill_manual(values = palette2) +
+  labs(x="Credit Use", y="Mean", 
+       title = "Feature Associations with Home Tax Credits",
+       subtitle = "(Continous Outcomes)",
+       caption = "Figure 2.1") +
+  plotTheme() + theme(legend.position = "none")
+
+demog %>%
+  dplyr::select(y, mortgage, taxbill_in_phl) %>%
+  gather(Variable, value, -y) %>%
+  count(Variable, value, y) %>%
+  #filter(value == "Yes") %>%
+  ggplot(aes(y, n, fill = y)) +   
+  geom_bar(position = "dodge", stat="identity") +
+  facet_wrap(~Variable, scales = "free", ncol=4) +
+  scale_fill_manual(values = palette2) +
+  labs(x="Credit Use", y="Count",
+       title = "Feature Associations with Home Tax Credits",
+       subtitle = "Two category features (Yes and No)", 
+       caption = "Figure 2.2") +
+  plotTheme() + theme(legend.position = "none")
+
+grid.arrange(ncol=2,
+ggplot(demog %>% dplyr::select(y, job) %>% gather(Variable, value, -y) %>%
+         count(Variable, value, y), aes(y, n, fill = value)) + 
+  geom_bar(position = "dodge", stat="identity")+
+  labs(x="Credit Use", y="Count", legend= "Job Type",
+       title = "Tax Credits by Job Category",
+       caption = "Figure 2.3", fill="Job Type")+
+  plotTheme(title_size=14) + theme(legend.text=element_text(size=8)) ,
+ggplot(demog %>% dplyr::select(y, education) %>% gather(Variable, value, -y) %>%
+         count(Variable, value, y), aes(y, n, fill = value)) + 
+  geom_bar(position = "dodge", stat="identity")+
+  labs(x="Credit Use", y="Count", legend= "Education Level",
+       title = "Tax Credits by Education Level",
+       caption = " ", fill="Education") +
+  plotTheme(title_size=14) + theme(legend.text=element_text(size=8)) )
+```
+
+
+## 3. Split your data into a 65/35 training/test set.
+
+```{r data_split}
+set.seed(3456)
+trainIndex <- createDataPartition(demog$y_numeric, p = .65,
+                                  list = FALSE,
+                                  times = 1)
+demoTrain <- demog[ trainIndex,]
+demoTest  <- demog[-trainIndex,]
+```
+
+## 4. The Sensitivity (True Positive Rate) for a model with all the features is very low. Engineer new features that significantly increase the Sensitivity.
+
+```{r engineer_features}
+
+demogE <- demog %>% 
+  mutate(highEd = as.factor(ifelse(education %in% c("professional.course","university.degree" ), 1, 0)),
+         old = as.factor(ifelse(age >= 40, 1, 0)),
+         highInf = as.factor(ifelse(inflation_rate >= 2.5, 1, 0)),
+         lowEmploy = as.factor(ifelse(unemploy_rate <= -0.5, 1, 0)),
+         single = as.factor(ifelse(marital %in% c("single"),1,0)),
+         blueCollar = as.factor(ifelse(job %in% c("blue-collar" ), 1, 0)) )
+
+set.seed(3456)
+trainIndexE <- createDataPartition(demogE$y_numeric, p = .65,
+                                  list = FALSE,
+                                  times = 1)
+demoTrainE <- demogE[ trainIndexE,]
+demoTestE  <- demogE[-trainIndexE,]
+
+```
+
+### 4.1 Interpret your new features in one paragraph.
+
+To attempt to increase sensitivity, I add a few binary categories:
+
+- Higher education, split by university degrees/professional courses.
+- Age, broken between people above and below 40.
+- Inflation rates of the year contacted; as in Figure 2.1, an inflation rate slightly above 2% is the average for people who have used the credit, so rates are split by 2.5%.
+- Low employment, here below -0.5.
+- Jobs, specified by blue-collar and non-blue-collar jobs.
+
+### 4.2 Show a regression summary for both the kitchen sink and your engineered regression.
+
+```{r reg_summaries}
+
+creditRegBase <- glm(y_numeric ~ .,
+                     data=demoTrain %>% dplyr::select(-y),
+                     family="binomial" (link="logit"))
+
+creditRegEng <- glm(y_numeric ~ .,
+                     data=demoTrainE %>% dplyr::select(y_numeric, highEd, old, highInf, lowEmploy, blueCollar, mortgage, single), 
+                     family="binomial" (link="logit"))
+
+summary(creditRegBase)
+summary(creditRegEng)
+```
+
+### 4.3 Cross validate both models; compare and interpret two facetted plots of ROC, Sensitivity and Specificity.
+
+From Figure 4.1 below, the models look about the same, but cvFitE does have a slightly higher sensitivity of 0.227 rather than 0.221.
+
+```{r cross_validation}
+
+ctrl <- trainControl(method = "cv", number = 100, classProbs=TRUE, summaryFunction=twoClassSummary)
+cvFitB <- train(y ~ ., data = demog %>% 
+                 dplyr::select(-y_numeric), 
+               method="glm", family="binomial",
+               metric="ROC", trControl = ctrl)
+
+cvFitE <- train(y ~ ., data = demogE %>% 
+                  dplyr::select(-y_numeric, highEd, old, highInf, lowEmploy, blueCollar, mortgage, single), 
+               method="glm", family="binomial",
+               metric="ROC", trControl = ctrl)
+```
+
+```{r ggplots}
+grid.arrange(nrow=2,
+ggplot(dplyr::select(cvFitB$resample, -Resample) %>% gather(metric, value) %>%
+           left_join(gather(cvFitB$results[2:4], metric, mean)), aes(value)) + 
+  geom_histogram(bins=35, fill = "#FF006A") +
+  facet_wrap(~metric) +
+  geom_vline(aes(xintercept = mean), colour = "#981FAC", linetype = 3, size = 1.5) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(x="Goodness of Fit", y="Count", title="CV Base Model: Goodness of Fit Metrics",
+       subtitle = "Across-fold mean reprented as dotted lines") +
+  plotTheme(), 
+ggplot(dplyr::select(cvFitE$resample, -Resample) %>% gather(metric, value) %>%
+           left_join(gather(cvFitE$results[2:4], metric, mean)), aes(value)) + 
+  geom_histogram(bins=35, fill = "#FF006A") +
+  facet_wrap(~metric) +
+  geom_vline(aes(xintercept = mean), colour = "#981FAC", linetype = 3, size = 1.5) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(x="Goodness of Fit", y="Count", title="CV Engineered Model: Goodness of Fit Metrics",
+       subtitle = "Across-fold mean reprented as dotted lines",caption = "Figure 4.1") +
+  plotTheme() ) 
+```
+
+
+## 5. Output an ROC curve for your new model and interpret it.
+
+In the ROC Curve for Figure 5.1, it is clear that the new engineered features do not shift the curve significantly from what it was at base level; because I am just adding features to the base model to improve the sensitivity, this makes sense. About 65-70% of true positives can be predicted by the engineered features ROC Curve with a fairly low rate-- around 20%-- of false positives; however, with greater percentages of true positives, the false positives increase as a greater rate.
+
+```{r ROC}
+
+testProbsB <- 
+  data.frame(Outcome = as.factor(demoTest$y_numeric),
+             Probs = predict(creditRegBase, demoTest, type= "response"))
+testProbsB <- testProbsB %>% 
+  mutate(predOutcome  = as.factor(ifelse(testProbsB$Probs > 0.5, 1, 0)))
+
+testProbsE <- 
+  data.frame(Outcome = as.factor(demoTestE$y_numeric),
+             Probs = predict(creditRegEng, demoTestE, type= "response"))
+testProbsE <- testProbsE %>% 
+  mutate(predOutcome  = as.factor(ifelse(testProbsE$Probs > 0.5, 1, 0)))
+
+grid.arrange(ncol=2,
+ggplot(testProbsB, aes(d = as.numeric(testProbsB$Outcome), m = Probs)) +
+  geom_roc(n.cuts = 50, labels = FALSE, colour = "#FE9900") +
+  geom_abline(slope = 1, intercept = 0, size = 1.5, color = 'grey') +
+  labs(title = "Base Model ROC Curve", caption = "Figure 5.1") +
+  plotTheme(title_size=12),
+ggplot(testProbsE, aes(d = as.numeric(testProbsE$Outcome), m = Probs)) +
+  geom_roc(n.cuts = 50, labels = FALSE, colour = "#FE9900") +
+  geom_abline(slope = 1, intercept = 0, size = 1.5, color = 'grey') +
+  labs(title = "Engineered Features ROC Curve", caption = " ")+
+  plotTheme(title_size=12) )
+
+```
+
+**Confusion Matrices for Both Models**
+
+As can be seen from the matrices below, the base matrix produced by the test probabilities has a sensitivity of about 0.2. However, though the accuracy of the engineered model is still near 0.9, the engineered model has a sensitivity of 0-- perhaps due to the threshold of 0.5.
+
+```{r}
+
+caret::confusionMatrix(testProbsB$predOutcome, testProbsB$Outcome, 
+                           positive = "1")
+caret::confusionMatrix(testProbsE$predOutcome, testProbsE$Outcome, 
+                           positive = "1")
+
+```
+
+## 6. Develop a cost benefit analysis.
+
+### 6.1 Write out the cost/benefit equation for each confusion metric.
+
+We are assuming that 25% of contacted owners actually use the home tax credit. For this exercise, I am going to incorporate both the cost of the outreach allocation, in addition to the cost of the actual home credit, as **costs**. The estimated benefit of $10,000, in addition to the aggregate premiums for the surrounding homes of \$56,000, will be counted as **revenue**; these are not perfect measures, but will do for a basic approximation. Another valuable cost would be the amount that homeowners actually spend on improving their houses after receiving the credit-- we have the "amount spent on repairs" as a variable, but it does not differentiate amounts based on credit use.
+
+As such, the revenues will be:
+
+TP = \$-2,850 - \$5,000 + \$10,000 + \$56,000 = \$58,150  
+
+FP = \$-2,850 
+
+TN = $0 
+
+FN = \$0 
+
+For each homeowner in each confusion metric. For the TP (True Positive), this will only be true for the 25% of homeowners that accept the credit. It  might seem reasonable to attribute a loss to the 'False Negative' category, but since this metric means that the homeowner took the credit (even without marketing resources), it makes more sense to just "zero out" this category. As such, the only metric that have actual values are True Positives and False Positives.
+
+### 6.2 Create the ‘Cost/Benefit Table.’
+
+Because the confusion matrix gave a sensitivity of 0, the projected revenue for the 0.5 threshold is also 0.
+
+```{r cba_table}
+
+cost_benefit_table <-
+  testProbsE %>%
+  count(predOutcome, Outcome) %>%
+  summarize(True_Negative = sum(n[predOutcome==0 & Outcome==0]),
+            True_Positive = sum(n[predOutcome==1 & Outcome==1]),
+            False_Negative = sum(n[predOutcome==0 & Outcome==1]),
+            False_Positive = sum(n[predOutcome==1 & Outcome==0])) %>%
+  gather(Variable, Count) %>%
+  mutate(Revenue =
+           case_when(Variable == "True_Negative"  ~ Count * 0,
+                     Variable == "True_Positive"  ~ ((66000) * (Count * .25)) + (-7850 * (Count * .25)),
+                     Variable == "False_Negative" ~ Count * 0,
+                     Variable == "False_Positive" ~ (-2850) * Count)) %>%
+  bind_cols(data.frame(Description = c(
+    "Predicted correctly homeowner would not take the credit, no marketing resources allocated; no credit allocated.",
+    "Predicted correctly homeowner would take the credit; allocated the marketing resources, and 25% took the credit.",
+    "Predicted incorrectly that a homeowner would not take the credit, but they did.",
+    "Predicted incorrectly homeowner would take the credit; allocated marketing resources; no credit allocated.")))
+
+cost_benefit_table %>% 
+  kable(align='c', caption="Table 6.1 Cost-Benefit Table") %>% 
+  kable_styling("striped")
+```
+
+### 6.3 Plot the confusion metric outcomes for each Threshold.
+
+```{r}
+
+whichThreshold <- 
+  iterateThresholds(
+    data=testProbsE, observedClass = Outcome, predictedProbs = Probs) 
+
+grid.arrange(ncol=2,nrow=2,
+ggplot(whichThreshold,aes(Threshold, Rate_TP)) +
+  geom_point() +
+  labs(title = "True Positive Rate by Threshold",
+       y = "Rate_TP") +
+  plotTheme(title_size=12),
+ggplot(whichThreshold,aes(Threshold, Rate_FP)) +
+  geom_point() +
+  labs(title = "False Positive Rate by Threshold",
+       y = "Rate_FP") +
+  plotTheme(title_size=12),
+ggplot(whichThreshold,aes(Threshold, Rate_TN)) +
+  geom_point() +
+  labs(title = "True Negative Rate by Threshold",
+       y = "Rate_TN", caption = "Figure 6.1") +
+  plotTheme(title_size=12),
+ggplot(whichThreshold,aes(Threshold, Rate_FN)) +
+  geom_point() +
+  labs(title = "False Negative Rate by Threshold",
+       y = "Rate_FN", caption = " ") +
+  plotTheme(title_size=12) )
+
+```
+
+
+### 6.4 Create two small multiple plots that show Threshold as a function of Total_Revenue and Total_Count_of_Credits. Interpret this.
+
+From the graphs below, we can see that the false positive credit count drops quickly up to about a threshold of 0.1, where it meets the more slowly decreasing true positive credit count data. As for revenue, with threshold increases, revenue reaches values closer to zero for all elements of the confusion matrix.
+
+```{r threshold_plots}
+
+whichThreshold_revenue <- 
+  whichThreshold %>%
+  dplyr::select(starts_with("Count"), Threshold) %>%
+  gather(Variable, Count, -Threshold) %>%
+  mutate(Revenue =
+           case_when(Variable == "Count_TN"  ~ Count * 0,
+                     Variable == "Count_TP"  ~ ((66000) * (Count * .25)) + (-2850 * (Count * .25)),
+                     Variable == "Count_FN"  ~ Count * 0,
+                     Variable == "Count_FP"  ~ (-2850) * Count))
+
+ggplot(whichThreshold_revenue,aes(Threshold, Revenue, colour = Variable)) +
+  geom_point() +
+  scale_colour_manual(values = palette5[c(5, 1:3)]) +    
+  labs(title = "Revenue by Confusion Matric and Threshold",
+       y = "Revenue", caption = "Figure 6.2") +
+  plotTheme() +
+  guides(colour=guide_legend(title = "Confusion Matrix"))
+
+whichThreshold_revenue %>%
+  ggplot(.,aes(Threshold, Count, colour = Variable)) +
+  geom_point() +
+  scale_colour_manual(values = palette5[c(5, 1:3)]) +    
+  labs(title = "Credit Counts by Confusion Matric and Threshold",
+       y = "Credit Counts", caption = "Figure 6.3") +
+  plotTheme() +
+  guides(colour=guide_legend(title = "Confusion Matrix"))
+
+```
+
+
+### 6.5 Create a table of the Total_Revenue and Total_Count_of_Credits allocated for 2 categories. 50%_Threshold and your Optimal_Threshold.
+
+It is somewhat difficult to decide an optimal threshold due to the low sensitivity of the models; however, from the graph of credit counts above and a few calculations of different thresholds, I have chosen 0.2 as the optimal threshold, since it seems to maximize revenue at about $800,000.
+
+```{r revenue_tables}
+
+whichThreshold_revenue[whichThreshold_revenue$Threshold == 0.50, ]  %>%
+  kable(align='c',caption="Table 6.2 50% Threshold Revenue and Counts") %>% 
+  kable_styling("striped")
+
+whichThreshold_revenue[whichThreshold_revenue$Threshold == 0.2, ]  %>%
+  kable(align='c', caption="Table 6.3 Optimal Threshold Revenue and Counts") %>% 
+  kable_styling("striped")
+
+```
+
+## 7. Conclude whether and why this model should or shouldn’t be put into production. What could make the model better? What would you do to ensure that the marketing materials resulted in a better response rate?
+
+This model should not be put into production, mainly due to the necessity of using such a low threshold (<0.25) to yield a sensitivity above zero. To improve the sensitivity in future surveys, I would say we need better information on these homeowners, like income, current home value or price that homes were bought for, year that homes were purchased, etc. 
+
+Because the number of people in the response set who used the housing tax credit was so small proportional to the number of responses, engineering a higher sensitivity was difficult. Adding variables, even ones that were based on somewhat clear splits in data (such as inflation rate), only seemed to nudge the sensitivity up slightly. It was difficult to choose between just including the engineered features and all of the features including the engineered features; however, including all of the features increases the chance of the model being overfit.
