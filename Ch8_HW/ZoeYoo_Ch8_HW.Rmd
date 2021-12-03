@@ -23,32 +23,32 @@ library(gridExtra)
 library(knitr)
 library(kableExtra)
 library(gifski); library(gganimate)
+library(RColorBrewer)
+library(stargazer)
+library(purrr)
 
-
+root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 palette5 <- c("#981FAC","#CB0F8B","#FF006A","#FE4C35","#FE9900")
 palette4 <- c("#981FAC","#FF006A","#FE4C35","#FE9900")
 palette2 <- c("#981FAC","#FF006A")
-root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
-source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 
 ```
 
-introduce the reader to bike share and the need for re-balancing. How will re-balancing occur? Perhaps you will manage a small fleet of trucks to move bikes from here to there or perhaps you will offer rewards, discounts or other incentives for riders to move a bike from place to place. Keep in mind, your plan will inform the appropriate time lag features you can use. How far forward do you wish to predict for at any given time?
+## 1. The Necessity of Analyzing Bikeshare
 
-## The necessities of bike share
+  Bike share programs are being implemented by many municipal transit systems as a quick, familiar option for people to navigate cities with. They are quickly becoming an essential facet of transit among buses and trains, especially as they are somewhat easy to install, generally popular and widely used, and generate revenue; in addition, bikeshare use encourages the further development of bicycle infrastructure. Bikeshare systems do pose logistic issues that were not present in previous transit forms: namely, the problem of stations becoming un-balanced. Often, people take more bikes/rides in one direction, such as towards downtown areas, than the opposite, which leads to empty stations in some areas and overloaded stations with no space in others. Unbalanced directional use is also an issue with buses and trains, but there poses challenges related to scheduling and revenue-- other than extreme cases, unbalanced trains/buses do not limit peoples' ability to use them. With bikeshare, unbalanced use prevents people from being able to utilize the system, and so is a much larger issue that needs to be addressed.
 
-Bike share programs are being implemented by many municipal transit systems as a quick, familiar option for people to navigate cities with. They are quickly becoming an essential facet of transit among buses and trains, especially as they are somewhat easy to install, generally popular and widely used, and generate revenue; in addition, bikeshare use encourages the further development of bicycle infrastructure. Bikeshare systems do pose logistic issues that were not present in previous transit forms: namely, the problem of stations becoming un-balanced. Often, people take more bikes/rides in one direction, such as towards downtown areas, than the opposite, which leads to empty stations in some areas and overloaded stations with no space in others. Unbalanced directional use is also an issue with buses and trains, but there poses challenges related to scheduling and revenue-- other than extreme cases, unbalanced trains/buses do not limit peoples' ability to use them. With bikeshare, unbalanced use prevents people from being able to utilize the system, and so is a much larger issue that needs to be addressed.
+  There are several approaches to combating station un-balancing; for example, the Indego system in Philadelphia offers riders credit-building towards free rides in exchange for taking bikes to empty stations, and many cities use trucks to move bicycles between stations. However, though these interventions exist, many are reactive strategies that only take place *after* supply is already depleted; ideally, cities would be able to anticipate bikeshare supply strains before they happen and take appropriate steps to combat them, preventing people from walking up to empty stations or cycling to a fully stocked station. Here, I will be working on developing a predictive model, incorporating time lag (predicting based on ridership of previous time periods) to approximate which stations trend to be overloaded or undersupplied. It would be ideal to be able to predict bicycle shortages a week ahead of time, to ensure enough time is available to restock bikeshare stations.
 
-There are several approaches to combating station un-balancing; for example, the Indego system in Philadelphia offers riders credit-building towards free rides in exchange for taking bikes to empty stations, and many cities use trucks to move bicycles between stations. However, though these interventions exist, many are reactive strategies that only take place *after* supply is already depleted; ideally, cities would be able to anticipate bikeshare supply strains before they happen and take appropriate steps to combat them, preventing people from walking up to empty stations or cycling to a fully stocked station. Here, I will be working on developing a predictive model, incorporating time lag (predicting based on ridership of previous time periods) to approximate which stations trend to be overloaded or undersupplied. 
-
-My initial model will be for the San Francisco Bay Area Bay Wheels system, run in conjunction with Lyft and the Metropolitan Transportation Commission. I will not be studying ... as only a very minute number of people cross the bay on city bikes; for March and April of 2021, only 3 out of about 278,000 total Bay Wheels trips were recorded to cross the bay. Another interesting factor in the Bay Wheels system is that riders are actually able to park their eBikes at public bike racks instead of stations. This poses many more interesting questions about the placement of bikes throughout the Bay Area, including the possibility that overuse by eBikes blocks personal bike owners from bike racks. Though there is data available on bike rack locations in San Francisco (and would very interesting for future study), for this model I will be limiting the scope to bicycles that were locked at stations.
+  My initial model will be for the San Francisco Bay Area Bay Wheels system, run in conjunction with Lyft and the Metropolitan Transportation Commission. I will be limiting geographic extent just to San Francisco County and not examining cross-bay bikeshare, as only a very minute number of people cross the bay on city bikes; in fact, for March and April of 2021, only 3 out of about 278,000 total Bay Wheels trips were recorded to cross the bay. Another factor in the Bay Wheels system is that riders are actually able to park their eBikes at public bike racks instead of stations. This poses many more interesting questions about the placement of bikes throughout the Bay Area, including the possibility that overuse by eBikes blocks personal bike owners from bike racks. Though there is data available on bike rack locations in San Francisco, for this model I will be limiting the scope to bicycles that were locked at stations.
 
 
-## Feature Engineering
+## 2. Feature Engineering
 
-I drew initial data from the [Bay Wheels System Data](https://www.lyft.com/bikes/bay-wheels/system-data) site.
+I drew initial data from the [Bay Wheels System Data](https://www.lyft.com/bikes/bay-wheels/system-data) site. In addition to this basic data, which includes time and date, station location, member, and bike type information, I have added weather data collected from the San Francisco International Airport and census tract information from the 2019 5-Year American Community Survey (ACS) estimates. To incorporate a couple of amenities into the model, I also download the locations of BART stops, parks, and neighborhoods in San Francisco.
 
-```{r feature_calculations}
+```{r drawing_data, include=FALSE}
 
 ride <- read.csv("https://raw.githubusercontent.com/zoenyoo/MUSA508/main/Ch8_HW/202103-04tripdata_sf.csv")
 ride <- ride %>% 
@@ -69,6 +69,7 @@ sfCensus <-
           geometry = TRUE, 
           county=c("San Francisco"),
           output = "wide") %>%
+  st_transform('EPSG:2227') %>%
   rename(Total_Pop =  B01003_001E,
          Med_Inc = B19013_001E,
          Med_Age = B01002_001E,
@@ -87,6 +88,27 @@ sfCensus <-
          Percent_Taking_Public_Trans = Total_Public_Trans / Means_of_Transport,
          Percent_Taking_bike = Total_Bike / Means_of_Transport)
 
+sfCensus <- sfCensus[-c(60, 96, 197), ]
+
+BARTStops <- 
+  rbind(
+    st_read("http://raw.githubusercontent.com/zoenyoo/MUSA508/main/BART_System_2020.geojson") %>% 
+      mutate(System ="BART") %>%
+      select(System)) %>% 
+  st_transform(st_crs(sfCensus))
+BARTStops <-
+  BARTStops[sfCensus,]
+
+parks <-
+  st_read("https://data.sfgov.org/api/geospatial/42rw-e7xk?method=export&format=GeoJSON") %>% 
+  st_transform(st_crs(sfCensus)) 
+parks<-parks[sfCensus,]
+
+neighborhoods <-
+  st_read("https://data.sfgov.org/api/geospatial/pty2-tcw4?method=export&format=GeoJSON") %>% 
+  st_transform(st_crs(sfCensus))
+neighborhoods<-neighborhoods[sfCensus,]
+
 sfTracts <- 
   sfCensus %>%
   as.data.frame() %>%
@@ -96,6 +118,12 @@ sfTracts <-
 
 weather.Data <- 
   riem_measures(station = "SFO", date_start = "2021-03-01", date_end = "2021-04-30")
+
+```
+
+Here, I join weather data-- temperature, precipitation, and wind speed-- to the ride data, as well as calculate buffers to define if there are any BART stops or parks within a half-mile radius of each bikeshare station. For this case, I will only be comparing if either amenity is at the *starting* station.
+
+```{r feature_engineering}
 
 weather.Panel <-  
   weather.Data %>%
@@ -123,6 +151,7 @@ dat_census <- st_join(ride %>%
   rename(Origin.Tract = GEOID) %>%
   mutate(start_lng = unlist(map(geometry, 1)),
          start_lat = unlist(map(geometry, 2)))%>%
+  st_join(neighborhoods %>% st_transform(crs=4326)) %>% 
   as.data.frame() %>%
   select(-geometry)%>%
   st_as_sf(., coords = c("end_lng", "end_lat"), crs = 4326) %>%
@@ -136,6 +165,9 @@ dat_census <- st_join(ride %>%
   as.data.frame() %>%
   select(-geometry)
 
+# dat_census <- dat_census %>% 
+#   left_join(stationBuffer, by.x="end_station_id", by.y="start_station_name", suffix=c("_start","_end"))  
+
 study.panel <- 
   expand.grid(interval60=unique(dat_census$interval60), 
               start_station_id = unique(dat_census$start_station_id)) %>%
@@ -145,6 +177,30 @@ study.panel <-
               group_by(start_station_id) %>%
               slice(1))
 
+sfStations <-
+  expand.grid(start_station_id = unique(dat_census$start_station_id)) %>% 
+  left_join(., dat_census %>%
+              select(start_station_id, start_station_name, Origin.Tract, start_lng, start_lat)%>%
+              distinct() %>%
+              group_by(start_station_id) %>%
+              slice(1)) %>% 
+  st_as_sf(coords = c("start_lng", "start_lat"), 
+                 crs = 4326, agr = "constant")
+
+stationBuffer <- sfStations %>% 
+  st_transform('EPSG:2227') %>% 
+  st_buffer(2640) %>%
+  st_sf() 
+stationBuffer <-  st_join(stationBuffer,BARTStops, join=st_contains)
+stationBuffer <-  st_join(stationBuffer,parks, join=st_intersects) %>% 
+  as.data.frame() %>% 
+  distinct(start_station_id, .keep_all=TRUE) %>% 
+  mutate(BART=case_when(is.na(System) ==FALSE ~ 1,
+                        is.na(System) ==TRUE ~ 0),
+         park=case_when(is.na(x) ==FALSE ~ 0,
+                        is.na(x) ==TRUE ~ 1)) 
+stationBuffer <- stationBuffer[c("start_station_id", "BART","park")]
+
 ride.panel <- 
   dat_census %>%
   mutate(Trip_Counter = 1) %>%
@@ -152,16 +208,24 @@ ride.panel <-
   group_by(interval60, start_station_id, start_station_name, Origin.Tract, start_lng, start_lat) %>%
   summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>%
   left_join(weather.Panel, by = "interval60") %>%
+  left_join(stationBuffer, by="start_station_id") %>% 
   ungroup() %>%
   filter(is.na(start_station_id) == FALSE) %>%
   mutate(week = week(interval60),
          dotw = wday(interval60, label = TRUE)) %>%
   filter(is.na(Origin.Tract) == FALSE)
 
+top_stations <- ride.panel %>% group_by(start_station_id) %>% summarise(n = sum(Trip_Count)) 
+top_stations <- filter(top_stations, n>100) %>% arrange(desc(n))
+
 ride.panel <- 
   left_join(ride.panel, sfCensus %>%
               as.data.frame() %>%
-              select(-geometry), by = c("Origin.Tract" = "GEOID"))
+              select(-geometry), by = c("Origin.Tract" = "GEOID")) %>% 
+  mutate(topStations = case_when(start_station_id %in% top_stations$start_station_id ==FALSE ~ 0,
+                                 start_station_id %in% top_stations$start_station_id ==TRUE ~ 1))
+
+
 
 ride.panel <- 
   ride.panel %>% 
@@ -171,35 +235,23 @@ ride.panel <-
          lag3Hours = dplyr::lag(Trip_Count,3),
          lag4Hours = dplyr::lag(Trip_Count,4),
          lag12Hours = dplyr::lag(Trip_Count,12),
-         lag1day = dplyr::lag(Trip_Count,24),
-         holiday = ifelse(yday(interval60) == 148,1,0)) %>%
-   mutate(day = yday(interval60)) %>%
-   mutate(holidayLag = case_when(dplyr::lag(holiday, 1) == 1 ~ "PlusOneDay",
-                                 dplyr::lag(holiday, 2) == 1 ~ "PlustTwoDays",
-                                 dplyr::lag(holiday, 3) == 1 ~ "PlustThreeDays",
-                                 dplyr::lead(holiday, 1) == 1 ~ "MinusOneDay",
-                                 dplyr::lead(holiday, 2) == 1 ~ "MinusTwoDays",
-                                 dplyr::lead(holiday, 3) == 1 ~ "MinusThreeDays"),
-         holidayLag = replace_na(holidayLag, 0))
+         lag1day = dplyr::lag(Trip_Count,24)) 
 
-as.data.frame(ride.panel) %>%
-    group_by(interval60) %>% 
-    summarise_at(vars(starts_with("lag"), "Trip_Count"), mean, na.rm = TRUE) %>%
-    gather(Variable, Value, -interval60, -Trip_Count) %>%
-    mutate(Variable = factor(Variable, levels=c("lagHour","lag2Hours","lag3Hours","lag4Hours",
-                                                "lag12Hours","lag1day")))%>%
-    group_by(Variable) %>%  
-    summarize(correlation = round(cor(Value, Trip_Count),2))
+# as.data.frame(ride.panel) %>%
+#     group_by(interval60) %>% 
+#     summarise_at(vars(starts_with("lag"), "Trip_Count"), mean, na.rm = TRUE) %>%
+#     gather(Variable, Value, -interval60, -Trip_Count) %>%
+#     mutate(Variable = factor(Variable, levels=c("lagHour","lag2Hours","lag3Hours","lag4Hours",
+#                                                 "lag12Hours","lag1day")))%>%
+#     group_by(Variable) %>%  
+#     summarize(correlation = round(cor(Value, Trip_Count),2))
+
+top_stations <- ride.panel %>% group_by(start_station_id) %>% summarise(n = sum(Trip_Count)) 
+top_stations <- filter(top_stations, n>100) %>% arrange(desc(n))
 
 ```
 
-Below, I have plotted the number of bike share trips per hour for both March and April; though this is not apparent from the plots, the greatest ridership spikes (for example, March 6th, April 10th, both Saturdays, and April 18th, a Sunday, are much greater than weekdays. 
-
-```{r}
-
-```
-
-## Building Models
+Below, I have plotted the number of bike share trips per week for both March and April; from the plots, we can see that the greatest ridership spikes (for example, March 6th, April 10th, both Saturdays, and April 18th, a Sunday, are much greater than weekdays. This usage indicates that though there is some usage of Lyft bikes for daily commutes (around 10-40 people per day), most people are using bikeshare for recreational purposes. Additionally, to train and test the data, I broke up the dataset into Training and Testing sets of the first six weeks and the last three weeks.
 
 ```{r model_building}
 
@@ -214,8 +266,7 @@ mondays <-
 
 easter   <- as.POSIXct("2021-04-04 01:00:00 UTC")
 
-(rbind(
-  mutate(ride.Train, Legend = "Training"), 
+(rbind(mutate(ride.Train, Legend = "Training"), 
   mutate(ride.Test, Legend = "Testing"))) %>%
   group_by(Legend, interval60) %>% 
   summarize(Trip_Count = sum(Trip_Count)) %>%
@@ -226,7 +277,7 @@ easter   <- as.POSIXct("2021-04-04 01:00:00 UTC")
   geom_vline(data = mondays, aes(xintercept = monday)) +
   labs(title="Bike Share Trips by Week, San Francisco, March & April 2021 ",
        subtitle="Divided by Mondays, Dotted Line for Easter", 
-       x="Day", y="Trip Count") +
+       x="Day", y="Trip Count", caption="Figure 2.1") +
   plotTheme() + theme(panel.grid.major = element_blank())  
 
 ```
@@ -243,58 +294,281 @@ correlation.lag <-
   group_by(plotData.lag, Variable) %>%
   summarize(correlation = round(cor(Value, Trip_Count, use = "complete.obs"), 2)) 
 
-group_by(ride.panel, week, start_station_id) %>%
-  summarize(Sum_Trip_Count = sum(Trip_Count)) %>%
-  ungroup() %>% 
-  ggplot() + geom_sf(aes(fill = q5(Sum_Trip_Count))) +
-  facet_wrap(~week, ncol = 8) +
-  scale_fill_manual(values = palette5,
-                    labels = c("16", "140", "304", "530", "958"),
-                    name = "Trip_Count") +
-  labs(title="Sum of rideshare trips by tract and week") +
-  mapTheme() + theme(legend.position = "bottom") 
 ```
 
+To show bikeshare trips over time, the animation below adjusts the color of its points for every 15 minutes of time for one day in the dataset: specifically, Saturday, March 6 2021. It is busier day for bikeshare, but as can be seen in the animation below, very few stations have more than one pickup per 15 minutes, with many sitting unused for most or all of the day. Since most of the highly-frequented stations with the most bike "exchanges" are in the busier, more central areas of the city, bikes may not need to be re-balanced as often in these areas. The main issue comes with having stations that may only be used "one-way," such as with riders that take a bicycle to travel into the city and take transit back, or vice-versa. With central areas this is less of a problem because people will generally take trips both to and from central bikeshare stations, but more remote stations may need to be manually restocked with bicycles. Driving to restock remote areas with bicycles also takes up more time and is thus more costly than restocking densely-located stations.
 
-```{r}
+```{r mon_animation, include=FALSE}
 
-week9 <-
-  filter(ride, week == 9 & dotw == "Mon")
+# week9Mon <-
+#   filter(ride, week == 9 & dotw == "Mon")
+# 
+# week9Mon.panel <-
+#   expand.grid(
+#     interval15 = unique(week9Mon$interval15),
+#     start_station_id = unique(ride$start_station_id))
+# 
+# ride.animation.dataMon <-
+#   mutate(week9Mon, Trip_Counter = 1) %>%
+#   right_join(week9Mon.panel) %>% 
+#   group_by(interval15, start_station_id) %>%
+#   summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>% 
+#   ungroup() %>% 
+#   left_join(sfStations, by="start_station_id") %>%
+#   mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
+#                            Trip_Count > 0 & Trip_Count <= 3 ~ "1-3 trips",
+#                            Trip_Count > 3 & Trip_Count <= 6 ~ "4-6 trips",
+#                            Trip_Count > 6 & Trip_Count <= 10 ~ "7-10 trips")) %>%
+#   mutate(Trips  = fct_relevel(Trips, "0 trips","1-3 trips","4-6 trips",
+#                               "7-10 trips")) %>% 
+#   st_as_sf()
+# 
+# rideshare_animationMon <-
+#   ggplot() +
+#   geom_sf(data=sfCensus, color="grey")+
+#   geom_sf(data=st_union(sfCensus), color="black", fill=NA)+
+#   scale_fill_manual(values = palette4) +
+#   labs(title = "Bike Share Pickups in San Francisco, \nMonday, March 1, 2021",
+#        subtitle = "15 minute intervals: {current_frame}") +
+#   theme(legend.position="right")+
+#   transition_manual(interval15) +
+#   mapTheme()
+# 
+# animate(rideshare_animationMon, duration=20, renderer = gifski_renderer())
 
-week9.panel <-
+```
+
+```{r sat_animation}
+
+week9Sat <-
+  filter(ride, week == 10 & dotw == "Sat")
+
+week9Sat.panel <-
   expand.grid(
-    interval15 = unique(week9$interval15),
+    interval15 = unique(week9Sat$interval15),
     start_station_id = unique(ride$start_station_id))
 
-ride.animation.data <-
-  mutate(week9, Trip_Counter = 1) %>%
-  right_join(week9.panel) %>% 
+ride.animation.dataSat <-
+  mutate(week9Sat, Trip_Counter = 1) %>%
+  right_join(week9Sat.panel) %>% 
   group_by(interval15, start_station_id) %>%
   summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>% 
   ungroup() %>% 
-  left_join(sfTracts, by=c("start_station_id" = "GEOID")) %>%
-  st_sf() %>%
-  st_transform(4326) %>% 
+  left_join(sfStations, by="start_station_id") %>%
   mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
                            Trip_Count > 0 & Trip_Count <= 3 ~ "1-3 trips",
                            Trip_Count > 3 & Trip_Count <= 6 ~ "4-6 trips",
                            Trip_Count > 6 & Trip_Count <= 10 ~ "7-10 trips",
                            Trip_Count > 10 ~ "11+ trips")) %>%
   mutate(Trips  = fct_relevel(Trips, "0 trips","1-3 trips","4-6 trips",
-                              "7-10 trips","10+ trips"))
+                              "7-10 trips", "11+ trips")) %>% 
+  st_sf()
 
-rideshare_animation <-
+rideshare_animationSat <-
   ggplot() +
-  geom_sf(data = ride.animation.data, aes(fill = Trips)) +
-  scale_fill_manual(values = palette5) +
-  labs(title = "Rideshare pickups for one day in November 2018",
-       subtitle = "15 minute intervals: {current_frame}") +
+  geom_sf(data=sfCensus, color="grey")+
+  geom_sf(data=st_union(sfCensus), color="black", fill=NA)+
+  geom_sf(data = ride.animation.dataSat, aes(color = Trips)) +
+  #scale_color_brewer(palette="YlOrRd") +
+  scale_fill_manual(values = palette4)+
+  labs(title = "Bike Share Pickups in San Francisco, \nSaturday, March 6, 2021",
+       subtitle = "15 minute intervals: {current_frame}",
+       caption = "Figure 2.2") +
+  theme(legend.position="right")+
   transition_manual(interval15) +
   mapTheme()
 
-animate(rideshare_animation, duration=20, renderer = gifski_renderer())
+animate(rideshare_animationSat, duration=20, renderer = gifski_renderer())
+
+```
+
+## 3. Building Models
+
+I create four models for the purpose of comparison. The first only includes time (hour, day of the week) and temperature data, and the second only includes spatial structure via bikeshare station ID, day of the week, and temperature as independent variables. The third regression includes all of the aforementioned variables as well as precipitation and wind speed; the fourth uses these variables in addition to time lag, some factors from tract-level census data, and two amenity factors relating to start stations (BART stops and parks within a 0.5 mile buffer). 
+
+```{r model_creation,results = "asis"}
+
+rm(ride)
+
+reg1 <- 
+  lm(Trip_Count ~  hour(interval60) + dotw + Temperature,  data=ride.Train)
+
+reg2 <- 
+  lm(Trip_Count ~  start_station_id + dotw + Temperature,  data=ride.Train)
+
+reg3 <- 
+  lm(Trip_Count ~  start_station_id + hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed, 
+     data=ride.Train)
+
+reg4 <- 
+  lm(Trip_Count ~  start_station_id +  hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed +
+                   lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day + topStations +
+                   Percent_Taking_Public_Trans + Total_Pop + Percent_Taking_bike + BART + park,
+     # 
+     data=ride.Train)
+
+stargazer(reg1, reg2, reg3, reg4, omit=c("start_station_id","interval60", "dotw", "Temperature", "Precipitation", "Wind_Speed",
+                   "lagHour","lag2Hours","lag3Hours", "lag12Hours", "lag1day","topStations",
+                   "Percent_Taking_Public_Trans"), 
+          type = "html", title="Figure 3.1 Regression Results", column.labels = c("(A) Time", "(B) Space", "(C) Time + Space",
+                                                                       "(D) Time + Space + Time Lag"))
+```
+
+### Model Validation
+
+To calculate predictions, I use the purrr package from tidyverse, to map a model prediction function to each row of data, which produces a list of predictions for each model by week. I then loop through the absolute error of these predictions to calculate mean absolute error (MAE) and standard deviation (SD). The error for each test week is shown in Figure 3.2, which shows week 18 as it is included in the data, but lacks a full week to calculate predictions for (only partial data). Figure 3.3 plots observed values for the last three weeks by the predictions for each model; clearly, the model that incorporates time, space, and time lag (along with the amenities) has the closest predictions, so it is the model I will continue with. With this plot, it is also apparent that most of the error will be from underpredicting, as the predictions are mostly unable to reach the "peaks" seen in observed use.
+
+```{r model_validation}
+
+ride.Test.weekNest <- 
+  ride.Test %>%
+  nest(-week) 
+model_pred <- function(dat, fit){
+   pred <- predict(fit, newdata = dat)}
+
+week_predictions <- 
+  ride.Test.weekNest %>% 
+    mutate(ATime_FE = map(.x = data, fit = reg1, .f = model_pred),
+           BSpace_FE = map(.x = data, fit = reg2, .f = model_pred),
+           CTime_Space_FE = map(.x = data, fit = reg3, .f = model_pred),
+           DTime_Space_FE_timeLags = map(.x = data, fit = reg4, .f = model_pred)) %>% 
+    gather(Regression, Prediction, -data, -week) %>%
+    mutate(Observed = map(data, pull, Trip_Count),
+           Absolute_Error = map2(Observed, Prediction,  ~ abs(.x - .y)),
+           MAE = map_dbl(Absolute_Error, mean, na.rm = TRUE),
+           sd_AE = map_dbl(Absolute_Error, sd, na.rm = TRUE))
+
+week_predictions %>%
+  dplyr::select(week, Regression, MAE) %>%
+  gather(Variable, MAE, -Regression, -week) %>%
+  ggplot(aes(week, MAE)) + 
+    geom_bar(aes(fill = Regression), position = "dodge", stat="identity") +
+    scale_fill_manual(values = palette5) +
+    labs(title = "Mean Absolute Errors by Model and Week",
+         caption="Figure 3.2") +
+  plotTheme()
+
+week_predictions %>% 
+    mutate(interval60 = map(data, pull, interval60),
+           start_station_id = map(data, pull, start_station_id)) %>%
+    dplyr::select(interval60, start_station_id, Observed, Prediction, Regression) %>%
+    unnest() %>%
+    gather(Variable, Value, -Regression, -interval60, -start_station_id) %>%
+    group_by(Regression, Variable, interval60) %>%
+    summarize(Value = sum(Value)) %>%
+    ggplot(aes(interval60, Value, colour=Variable)) + 
+      geom_line(size = 1.1) + 
+      facet_wrap(~Regression, ncol=1) +
+      labs(title = "Predicted/Observed bike share time series", subtitle = "San Francisco; A test set of 3 weeks",
+           x = "Hour", y= "Station Trips", caption="Figure 3.3") +
+      plotTheme()
+
+```
+
+## 4. Evaluating Error
+
+From Figure 4.1, we can see that MAE is generally low for outer bikeshare stations with low ridership. Model D is mostly accurate for these more remote values; however, with stations that are more centrally located, mean absolute error is generally higher. There are a number of stations in central San Francisco that do not have a high error, but it is unclear whether this is because they are lower ridership stations or another reason.
+
+```{r}
+
+week_predictions %>% 
+    mutate(interval60 = map(data, pull, interval60),
+           start_station_id = map(data, pull, start_station_id), 
+           start_lat = map(data, pull, start_lat), 
+           start_lng = map(data, pull, start_lng)) %>%
+    select(interval60, start_station_id, start_lng, start_lat, Observed, Prediction, Regression) %>%
+    unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags") %>%
+  group_by(start_station_id, start_lng, start_lat) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+ggplot(.)+
+  geom_sf(data=sfTracts %>% st_transform(crs=4326), color="grey", fill="gray94")+
+  geom_sf(data=st_union(sfTracts %>% st_transform(crs=4326)), color="black", fill=NA)+
+  geom_point(aes(x = start_lng, y = start_lat, color = MAE), 
+             fill = "transparent", alpha = 0.6)+
+  scale_colour_viridis(direction = -1,
+  discrete = FALSE, option = "D")+
+  ylim(min(dat_census$start_lat), max(dat_census$start_lat))+
+  xlim(min(dat_census$start_lng), max(dat_census$start_lng))+
+  labs(title="Mean Absolute Error, Test Set", subtitle="Model D",
+       caption="Fig 4.1")+
+  mapTheme()
 
 
 ```
 
+Figure 4.2 plots predicted by observed values for different times of day (Morning=5-10AM, Mid-Day=10AM-3PM, Evening=3PM-7PM, Overnight=8PM-5AM) by both weekdays and weekends.  If we plot observed vs. predicted for different times of day during the week and weekend, some patterns begin to emerge. As mentioned before, we are certainly underpredicting in general, at about the same level for each time of day; there is also little difference in error between weekdays and weekends, besides a slightly higher slope for evenings on weekends.
 
+```{r obs_pred_all, warning=FALSE, message = FALSE, cache=TRUE}
+week_predictions %>% 
+    mutate(interval60 = map(data, pull, interval60),
+           start_station_id = map(data, pull, start_station_id), 
+           start_lat = map(data, pull, start_lat), 
+           start_lng = map(data, pull, start_lng),
+           dotw = map(data, pull, dotw)) %>%
+    select(interval60, start_station_id, start_lng, 
+           start_lat, Observed, Prediction, Regression,
+           dotw) %>%
+    unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 5 | hour(interval60) > 20 ~ "Overnight",
+                                 hour(interval60) >= 5 & hour(interval60) < 10 ~ "Morning",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 20 ~ "Evening"))%>%
+  ggplot()+
+  geom_point(aes(x= Observed, y = Prediction))+
+    geom_smooth(aes(x= Observed, y= Prediction), method = "lm", se = FALSE, color = "red")+
+    geom_abline(slope = 1, intercept = 0)+
+  facet_grid(time_of_day~weekend)+
+  labs(title="Observed vs Predicted Bikeshare Trips by Time of Day",
+       subtitle="Model D",
+       x="Observed trips", y="Predicted trips", caption = "Figure 4.2")+
+  plotTheme()
+```
+
+```{r station_summary2, warning=FALSE, message = FALSE, include=FALSE}
+# Lets focus on the morning commute, where station locations probably relate to likely users, who seem to be commuting downtown to the loop. How is the model performing on weekday mornings relative to demand for public transportation (e.g. possible user base). We can tell that there are a select few stations that are proving very resistant to our model - they have high income, low transit usage and are <50% minority, demographically.
+# 
+# Pro Tip: If you want to look at your nested data sets to figure out what to `pull` from them, you can check out one of the data frames by using matrix notation and calling something like this: `week_predictions$data[1] %>% glimpse()`
+
+# 
+# week_predictions %>% 
+#     mutate(interval60 = map(data, pull, interval60),
+#            start_station_id = map(data, pull, start_station_id), 
+#            start_lat = map(data, pull, start_lat), 
+#            start_lng = map(data, pull, start_lng),
+#            dotw = map(data, pull, dotw),
+#            Percent_Taking_Public_Trans = map(data, pull, Percent_Taking_Public_Trans),
+#            Med_Inc = map(data, pull, Med_Inc),
+#            Percent_White = map(data, pull, Percent_White)) %>%
+#     select(interval60, start_station_id, start_lng, 
+#            start_lat, Observed, Prediction, Regression,
+#            dotw, Percent_Taking_Public_Trans, Med_Inc, Percent_White) %>%
+#     unnest() %>%
+#   filter(Regression == "DTime_Space_FE_timeLags")%>%
+#   mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+#          time_of_day = case_when(hour(interval60) < 5 | hour(interval60) > 20 ~ "Overnight",
+#                                  hour(interval60) >= 5 & hour(interval60) < 10 ~ "Morning",
+#                                  hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+#                                  hour(interval60) >= 15 & hour(interval60) <= 20 ~ "Evening")) %>%
+#   filter(time_of_day == "Evening") %>%
+#   group_by(start_station_id, Percent_Taking_Public_Trans, Med_Inc, Percent_White) %>%
+#   summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+#   gather(-start_station_id, -MAE, key = "variable", value = "value")%>%
+#   ggplot(.)+
+#   #geom_sf(data = chicagoCensus, color = "grey", fill = "transparent")+
+#   geom_point(aes(x = value, y = MAE), alpha = 0.4)+
+#   geom_smooth(aes(x = value, y = MAE), method = "lm", se= FALSE)+
+#   facet_wrap(~variable, scales = "free")+
+#   labs(title="Errors as a Function of socio-economic variables",
+#        y="Mean Absolute Error (Trips)")+
+#   plotTheme()
+#   
+```
+
+## 5. Conclusions
+
+  As seen from figure 4.1 and 4.2, the main issue with this prediction model is its tendency to underpredict, especially for stations that see the most use. This error varies the most spatially, with more centrally located stations having the largest level of error. As I previously discussed, since more frequently-used stations may have more exchanges and thus generally more available bicycles, this might not completely discount the current use of this model. There is still a need to improve the model, especially as the data only included information on rides, not on the actual capacity of stations. Without any measure of capacity, the need for accuracy is much higher; if this information were available, it would be possible to evaluate the level of capacity stations are at. Currently, the model is fairly accurate for lower values, and can be used to estimate general trends; we can also use this under the assumption that the maximum use predictions are actually larger, as they are consistently under-predicted.
+
+  To further improve this model and study how data varies throughout the year in response to weather, it would be useful to use a larger training and test set and re-train the data based on different seasons or holistically. My model was built on data from early spring, which most likely sees more bikeshare use than winter and less than summer. It is very difficult to say if this model is even useful for predicting other times of the year, as bikeshare is much more prone to changes under weather; while more committed cyclists might bike in rain or cold weather, people who take bikeshare recreationally are far less likely to pay for bikeshare use under inoptimal conditions. With more data, we may see more strong correlations between weather, weekends, and holidays.
