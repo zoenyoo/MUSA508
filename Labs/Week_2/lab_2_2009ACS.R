@@ -17,6 +17,8 @@ library(tidyverse)
 library(tidycensus)
 library(sf)
 library(kableExtra)
+library(ggplot2)
+library(dplyr)
 
 options(scipen=999)
 options(tigris_class = "sf")
@@ -82,7 +84,7 @@ palette5 <- c("#f0f9e8","#bae4bc","#7bccc4","#43a2ca","#0868ac")
 
 # Load census API key
 
-census_api_key("YOUR API KEY GOES HERE", overwrite = TRUE)
+census_api_key("0e2fd0485a8e62ac3a5ebf1ad8bebb2cb181de6b", overwrite = TRUE, install = TRUE)
 
 # ---- Year 2009 tracts -----
 
@@ -219,6 +221,7 @@ allTracts <- rbind(tracts09,tracts17)
 
 # ---- Wrangling Transit Open Data -----
 
+### You don't have to use a geojson for it to work, shapefile is also ok
 septaStops <- 
   rbind(
     st_read("https://opendata.arcgis.com/datasets/8c6e2575c8ad46eb887e6bb35825e1a6_0.geojson") %>% 
@@ -262,7 +265,7 @@ septaBuffers <-
       mutate(Legend = "Unioned Buffer"))
 
 # Let's examine both buffers by making a small multiple
-# "facet_wrap" plot showing each
+# "facet_wrap" plot showing each, splits maps based on the variable you select
 
 ggplot() +
   geom_sf(data=septaBuffers) +
@@ -297,14 +300,9 @@ selection <-
 
 # Let's go through this in pieces to understand what's happening here
 
-selectCentroids <-
-  st_centroid(tracts09)[buffer,] %>%
-  st_drop_geometry() %>%
-  left_join(., dplyr::select(tracts09, GEOID)) %>%
-  st_sf() %>%
-  dplyr::select(TotalPop) %>%
-  mutate(Selection_Type = "Select by Centroids")
-
+myData <- rbind(selectCentroids, clip) %>%
+  ggplot(myData)+
+  geom_sf(data=st)
 # Exercise - Can you create a small multiple map of the three types of operations?
 # Consult the text for some operations you can try
 # This is to be done in breakout groups
@@ -333,6 +331,19 @@ allTracts.group <-
 
 # Can you try to create the maps seen in the text?
 # The solutions are contained in "map_exercise.R"
+
+
+ggplot() + 
+  geom_sf(data=clip) +
+  geom_sf(data=septaStops, 
+          aes(colour = Line), 
+          show.legend = "point", size= 2) +
+  scale_colour_manual(values = c("orange","blue")) +
+  labs(title="Septa Stops", 
+       subtitle="Philadelphia, PA", 
+       caption="Figure 2.5") +
+  mapTheme()
+
 
 # --- TOD Indicator Tables ----
 

@@ -25,13 +25,13 @@ myData  <- rbind(selectCentroids, clip) %>%
   
   
   ggplot(allTracts.group)+
-    geom_sf(data = st_union(tracts09))+
+    geom_sf(data = st_union(tracts10))+
     geom_sf(aes(fill = q5(MedRent.inf))) +
-    geom_sf(data = buffer, fill = "transparent", color = "red")+
+    geom_sf(data = stop_Buffer, fill = "transparent", color = "red")+
     scale_fill_manual(values = palette5,
                       labels = qBr(allTracts.group, "MedRent.inf"),
                       name = "Rent\n(Quintile Breaks)") +
-    labs(title = "Median Rent 2009-2017", subtitle = "Real Dollars") +
+    labs(title = "Median Rent 2010-2019", subtitle = "Real Dollars") +
     facet_wrap(~year)+
     mapTheme() + 
     theme(plot.title = element_text(size=22))
